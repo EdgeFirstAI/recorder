@@ -16,3 +16,4 @@ memmap = "0.7.0"
 cdr = "0.2"
 zenoh = "0.10.0-rc"
 zenoh-ros-type = { git = "https://github.com/MaivinAI/zenoh-ros-type" }
+serde-big-array = "0.5.1"
