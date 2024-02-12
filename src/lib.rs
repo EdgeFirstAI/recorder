@@ -67,73 +67,73 @@ pub struct Boxes2d {
 }
 #[derive(Debug, Deserialize, Serialize)]
 pub struct Object {
-    label: String,
-    label_id: i16,
-    sublabel: String,
-    confidence: f32,
-    position: [f32; 3],
-    position_covariance: [f32; 6],
-    velocity: [f32; 3],
-    tracking_available: bool,
-    tracking_state: i8,
-    action_state: i8,
-    bounding_box_2d: BoundingBox2Di,
-    bounding_box_3d: BoundingBox3D,
-    dimensions_3d: [f32; 3],
-    skeleton_available: bool,
-    body_format: i8,
-    head_bounding_box_2d: BoundingBox2Df,
-    head_bounding_box_3d: BoundingBox3D,
-    head_position: [f32; 3],
-    skeleton_2d: Skeleton2D,
-    skeleton_3d: Skeleton3D,
+    pub label: String,
+    pub label_id: i16,
+    pub sublabel: String,
+    pub confidence: f32,
+    pub position: [f32; 3],
+    pub position_covariance: [f32; 6],
+    pub velocity: [f32; 3],
+    pub tracking_available: bool,
+    pub tracking_state: i8,
+    pub action_state: i8,
+    pub bounding_box_2d: BoundingBox2Di,
+    pub bounding_box_3d: BoundingBox3D,
+    pub dimensions_3d: [f32; 3],
+    pub skeleton_available: bool,
+    pub body_format: i8,
+    pub head_bounding_box_2d: BoundingBox2Df,
+    pub head_bounding_box_3d: BoundingBox3D,
+    pub head_position: [f32; 3],
+    pub skeleton_2d: Skeleton2D,
+    pub skeleton_3d: Skeleton3D,
 }
 #[derive(Debug, Deserialize, Serialize)]
 pub struct BoundingBox2Df {
-    corners: [Keypoint2Df; 4],
+    pub corners: [Keypoint2Df; 4],
 }
 
 #[derive(Debug, Deserialize, Serialize)]
 pub struct BoundingBox2Di {
-    corners: [Keypoint2Di; 4],
+    pub corners: [Keypoint2Di; 4],
 }
 
 #[derive(Debug, Deserialize, Serialize)]
 pub struct BoundingBox3D {
-    corners: [Keypoint3D; 8],
+    pub corners: [Keypoint3D; 8],
 }
 
 #[derive(Debug, Deserialize, Serialize)]
 pub struct Keypoint2Df {
-    kp: [f32; 2],
+    pub kp: [f32; 2],
 }
 
 #[derive(Debug, Deserialize, Serialize)]
 pub struct Keypoint2Di {
-    kp: [u32; 2],
+    pub kp: [u32; 2],
 }
 
 #[derive(Debug, Deserialize, Serialize)]
 pub struct Keypoint3D {
-    kp: [f32; 3],
+    pub kp: [f32; 3],
 }
 
 #[derive(Debug, Deserialize, Serialize)]
 pub struct Skeleton2D {
     #[serde(with = "BigArray")]
-    kp: [Keypoint2Df; 70],
+    pub kp: [Keypoint2Df; 70],
 }
 
 #[derive(Debug, Deserialize, Serialize)]
 pub struct Skeleton3D {
     #[serde(with = "BigArray")]
-    kp: [Keypoint3D; 70],
+    pub kp: [Keypoint3D; 70],
 }
 
 #[derive(Deserialize, Serialize)]
 pub struct ObjectsStamped {
-    header: Header,
-    objects: Vec<Object>,
+    pub header: Header,
+    pub objects: Vec<Object>,
 }
 
 pub fn decode_pointcloud2(points: &PointCloud2) -> Vec<Point> {
