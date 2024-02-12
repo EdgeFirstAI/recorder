@@ -1,20 +1,24 @@
+//! MCAP Reader Library for Rust
+//!
+//! The Reader Library provides a mechanism for reading MCAP
+//! frames and strcture the data in a readable format.
+
 use anyhow::{Context, Result};
 use camino::Utf8Path;
+use mcap::MessageStream;
 use memmap::Mmap;
 use serde::{Deserialize, Serialize};
+use serde_big_array::BigArray;
+use std::fs;
+use std::io::Error;
+use std::io::ErrorKind;
 use std::result::Result::Ok;
-use std::{fs, io::Cursor};
+use zenoh_ros_type::foxglove_msgs::FoxgloveCompressedVideo;
+use zenoh_ros_type::sensor_msgs::{point_field::FLOAT32, Image, NavSatFix, PointCloud2, IMU};
 use zenoh_ros_type::std_msgs::Header;
 
-use anyhow::Error;
-
-use serde_big_array::BigArray;
-
-use mcap::MessageStream;
-use zenoh_ros_type::sensor_msgs::{point_field::FLOAT32, Image, NavSatFix, PointCloud2, IMU};
-
 #[derive(Debug, Serialize, Deserialize)]
-struct Point {
+pub struct Point {
     pub x: f32,
     pub y: f32,
     pub z: f32,
@@ -25,7 +29,7 @@ struct Point {
     pub rcs: f32,
 }
 #[derive(Debug, Serialize, Deserialize)]
-struct Imu {
+pub struct Imu {
     pub roll: f64,
     pub pitch: f64,
     pub yaw: f64,
@@ -37,13 +41,13 @@ struct Imu {
     pub acceleration_z: f64,
 }
 #[derive(Debug, Serialize, Deserialize)]
-struct Gps {
+pub struct Gps {
     pub latitude: f64,
     pub longitude: f64,
     pub altitude: f64,
 }
 #[derive(Debug, Serialize, Deserialize)]
-struct Boxes3d {
+pub struct Boxes3d {
     pub label: i32,
     pub x: f32,
     pub y: f32,
@@ -53,7 +57,7 @@ struct Boxes3d {
     pub l: f32,
 }
 #[derive(Debug, Serialize, Deserialize)]
-struct Boxes2d {
+pub struct Boxes2d {
     pub label: i32,
     pub x: f32,
     pub y: f32,
@@ -62,7 +66,7 @@ struct Boxes2d {
     pub h: f32,
 }
 #[derive(Debug, Deserialize, Serialize)]
-struct Object {
+pub struct Object {
     label: String,
     label_id: i16,
     sublabel: String,
@@ -85,54 +89,54 @@ struct Object {
     skeleton_3d: Skeleton3D,
 }
 #[derive(Debug, Deserialize, Serialize)]
-struct BoundingBox2Df {
+pub struct BoundingBox2Df {
     corners: [Keypoint2Df; 4],
 }
 
 #[derive(Debug, Deserialize, Serialize)]
-struct BoundingBox2Di {
+pub struct BoundingBox2Di {
     corners: [Keypoint2Di; 4],
 }
 
 #[derive(Debug, Deserialize, Serialize)]
-struct BoundingBox3D {
+pub struct BoundingBox3D {
     corners: [Keypoint3D; 8],
 }
 
 #[derive(Debug, Deserialize, Serialize)]
-struct Keypoint2Df {
+pub struct Keypoint2Df {
     kp: [f32; 2],
 }
 
 #[derive(Debug, Deserialize, Serialize)]
-struct Keypoint2Di {
+pub struct Keypoint2Di {
     kp: [u32; 2],
 }
 
 #[derive(Debug, Deserialize, Serialize)]
-struct Keypoint3D {
+pub struct Keypoint3D {
     kp: [f32; 3],
 }
 
 #[derive(Debug, Deserialize, Serialize)]
-struct Skeleton2D {
+pub struct Skeleton2D {
     #[serde(with = "BigArray")]
     kp: [Keypoint2Df; 70],
 }
 
 #[derive(Debug, Deserialize, Serialize)]
-struct Skeleton3D {
+pub struct Skeleton3D {
     #[serde(with = "BigArray")]
     kp: [Keypoint3D; 70],
 }
 
 #[derive(Deserialize, Serialize)]
-struct ObjectsStamped {
+pub struct ObjectsStamped {
     header: Header,
     objects: Vec<Object>,
 }
 
-fn decode_pointcloud2(points: &PointCloud2) -> Vec<Point> {
+pub fn decode_pointcloud2(points: &PointCloud2) -> Vec<Point> {
     let mut point_vec = Vec::new();
     for i in 0..points.height as usize {
         for j in 0..points.width as usize {
@@ -198,35 +202,34 @@ fn decode_pointcloud2(points: &PointCloud2) -> Vec<Point> {
     return point_vec;
 }
 
-fn open_mcap<P: AsRef<Utf8Path>>(p: P) -> Result<Mmap> {
+pub fn open_mcap<P: AsRef<Utf8Path>>(p: P) -> Result<Mmap> {
     let fd = fs::File::open(p.as_ref()).context("Couldn't open MCAP file")?;
     unsafe { Mmap::map(&fd) }.context("Couldn't map MCAP file")
 }
 
-fn calculate_center(x_min: &u32, y_min: &u32, x_max: &u32, y_max: &u32) -> (u32, u32) {
+pub fn calculate_center(x_min: &u32, y_min: &u32, x_max: &u32, y_max: &u32) -> (u32, u32) {
     let center_x = (x_min + x_max) / 2;
     let center_y = (y_min + y_max) / 2;
     (center_x, center_y)
 }
 
-fn get_radar_data(points: PointCloud2) -> Result<Vec<Point>, Error> {
+pub fn get_radar_data(points: PointCloud2) -> Result<Vec<Point>, Error> {
     let radar_data = decode_pointcloud2(&points);
     Ok(radar_data)
 }
 
-fn get_raw_radar_data(message: mcap::Message<'_>) -> Result<PointCloud2, Error> {
-    let cursor = Cursor::new(message.data.into_owned());
-    let points = cdr::deserialize_from::<_, PointCloud2, _>(cursor, cdr::Infinite)?;
+pub fn get_raw_radar_data(message: mcap::Message<'_>) -> Result<PointCloud2, Error> {
+    let points: PointCloud2 =
+        cdr::deserialize(&message.data).expect("Failed to deserialize message");
     Ok(points)
 }
 
-fn get_raw_imu_data(message: mcap::Message<'_>) -> Result<IMU, Error> {
-    let cursor = Cursor::new(message.data.into_owned());
-    let imu_data = cdr::deserialize_from::<_, IMU, _>(cursor, cdr::Infinite)?;
+pub fn get_raw_imu_data(message: mcap::Message<'_>) -> Result<IMU, Error> {
+    let imu_data: IMU = cdr::deserialize(&message.data).expect("Failed to deserialize message");
     Ok(imu_data)
 }
 
-fn get_imu_data(imu_data: IMU) -> Result<Imu> {
+pub fn get_imu_data(imu_data: IMU) -> Result<Imu> {
     let x = imu_data.orientation.x;
     let y = imu_data.orientation.y;
     let z = imu_data.orientation.z;
@@ -261,13 +264,13 @@ fn get_imu_data(imu_data: IMU) -> Result<Imu> {
     })
 }
 
-fn get_raw_gps_data(message: mcap::Message<'_>) -> Result<NavSatFix, Error> {
-    let cursor = Cursor::new(message.data.into_owned());
-    let gps_data = cdr::deserialize_from::<_, NavSatFix, _>(cursor, cdr::Infinite)?;
+pub fn get_raw_gps_data(message: mcap::Message<'_>) -> Result<NavSatFix, Error> {
+    let gps_data: NavSatFix =
+        cdr::deserialize(&message.data).expect("Failed to deserialize message");
     Ok(gps_data)
 }
 
-fn get_gps_data(gps_data: NavSatFix) -> Result<Gps> {
+pub fn get_gps_data(gps_data: NavSatFix) -> Result<Gps> {
     let latitude = gps_data.latitude;
     let longitude = gps_data.longitude;
     let altitude = gps_data.altitude;
@@ -279,13 +282,13 @@ fn get_gps_data(gps_data: NavSatFix) -> Result<Gps> {
     })
 }
 
-fn get_raw_obj_data(message: mcap::Message<'_>) -> Result<ObjectsStamped, Error> {
+pub fn get_raw_obj_data(message: mcap::Message<'_>) -> Result<ObjectsStamped, Error> {
     let deserialized_message: ObjectsStamped =
         cdr::deserialize(&message.data).expect("Failed to deserialize message");
     Ok(deserialized_message)
 }
 
-fn get_2d_obj_data(box_2d_data: Vec<Object>) -> Result<Vec<Boxes2d>> {
+pub fn get_2d_obj_data(box_2d_data: Vec<Object>) -> Result<Vec<Boxes2d>> {
     let mut boxes_2d = Vec::new();
     const IMAGE_WIDTH: f32 = 1280.0;
     const IMAGE_HEIGHT: f32 = 720.0;
@@ -322,7 +325,7 @@ fn get_2d_obj_data(box_2d_data: Vec<Object>) -> Result<Vec<Boxes2d>> {
     Ok(boxes_2d)
 }
 
-fn get_3d_obj_data(box_3d_data: Vec<Object>) -> Result<Vec<Boxes3d>> {
+pub fn get_3d_obj_data(box_3d_data: Vec<Object>) -> Result<Vec<Boxes3d>> {
     let mut boxes_3d = Vec::new();
     for (_index, object) in box_3d_data.iter().enumerate() {
         if object.label == "Person" {
@@ -351,99 +354,11 @@ fn get_3d_obj_data(box_3d_data: Vec<Object>) -> Result<Vec<Boxes3d>> {
     Ok(boxes_3d)
 }
 
-fn get_raw_image_data(message: mcap::Message<'_>) -> Result<Image, Error> {
-    let cursor = Cursor::new(message.data.into_owned());
-    let image_data = cdr::deserialize_from::<_, Image, _>(cursor, cdr::Infinite)?;
-    Ok(image_data)
-}
-
-fn read_mcap(mapped: Mmap) -> Result<()> {
-    for message_result in MessageStream::new(&mapped)? {
-        let message: mcap::Message<'_> = message_result?;
-
-        if message.channel.topic == "/smart_radar/targets_0" {
-            match get_raw_radar_data(message.clone()) {
-                Ok(raw_radar_data) => match get_radar_data(raw_radar_data) {
-                    Ok(radar_data) => {
-                        println!("{:?}", radar_data);
-                    }
-                    Err(err) => {
-                        eprintln!("Error while getting radar data: {}", err);
-                    }
-                },
-                Err(err) => {
-                    eprintln!("Error while getting radar data: {}", err);
-                }
-            }
-        }
-
-        if message.channel.topic == "/imu" {
-            match get_raw_imu_data(message.clone()) {
-                Ok(raw_imu_data) => match get_imu_data(raw_imu_data) {
-                    Ok(imu_data) => {
-                        println!("{:?}", imu_data);
-                    }
-                    Err(err) => {
-                        eprintln!("Error while getting imu data: {}", err);
-                    }
-                },
-                Err(err) => {
-                    eprintln!("Error while getting raw imu data: {}", err);
-                }
-            }
-        }
-
-        if message.channel.topic == "/gps" {
-            match get_raw_gps_data(message.clone()) {
-                Ok(raw_gps_data) => match get_gps_data(raw_gps_data) {
-                    Ok(gps_data) => {
-                        println!("{:?}", gps_data);
-                    }
-                    Err(err) => {
-                        eprintln!("Error while getting gps data: {}", err);
-                    }
-                },
-
-                Err(err) => {
-                    eprintln!("Error while getting raw gps data: {}", err);
-                }
-            }
-        }
-
-        if message.channel.topic == "/zed/zed_node/obj_det/objects" {
-            match get_raw_obj_data(message.clone()) {
-                Ok(raw_obj_data) => match get_2d_obj_data(raw_obj_data.objects) {
-                    Ok(obj_data) => {
-                        println!("{:?}", obj_data);
-                    }
-                    Err(err) => {
-                        eprintln!("Error while getting obj data: {}", err);
-                    }
-                },
-
-                Err(err) => {
-                    eprintln!("Error while getting raw obj data: {}", err);
-                }
-            }
-        }
-
-        if message.channel.topic == "/zed/zed_node/left_raw/image_raw_color" {
-            match get_raw_image_data(message.clone()) {
-                Ok(raw_img_data) => {
-                    println!("{:?}", raw_img_data.encoding)
-                }
-                Err(err) => {
-                    eprintln!("Error while getting raw obj data: {}", err);
-                }
-            }
-        }
+pub fn get_raw_image_data(message: mcap::Message<'_>) -> Result<FoxgloveCompressedVideo, Error> {
+    let image_data: FoxgloveCompressedVideo =
+        cdr::deserialize(&message.data).expect("Failed to deserialize message");
+    if image_data.format == "h264" {
+        return Ok(image_data);
     }
-    Ok(())
-}
-
-fn main() -> Result<()> {
-    let mapped: Mmap = open_mcap("test.mcap")?;
-    let _ = read_mcap(mapped);
-
-    Ok(())
+    Err(Error::new(ErrorKind::Other, "Video processing failed"))
 }
