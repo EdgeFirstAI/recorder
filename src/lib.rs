@@ -5,7 +5,6 @@
 
 use anyhow::{Context, Result};
 use camino::Utf8Path;
-use mcap::MessageStream;
 use memmap::Mmap;
 use serde::{Deserialize, Serialize};
 use serde_big_array::BigArray;
@@ -363,7 +362,7 @@ pub fn get_raw_image_data(message: mcap::Message<'_>) -> Result<FoxgloveCompress
     Err(Error::new(ErrorKind::Other, "Video processing failed"))
 }
 
-fn get_raw_zed_image_data(message: mcap::Message<'_>) -> Result<Image, Error> {
+pub fn get_raw_zed_image_data(message: mcap::Message<'_>) -> Result<Image, Error> {
     let image_data: Image = cdr::deserialize(&message.data).expect("Failed to deserialize message");
     Ok(image_data)
 }
