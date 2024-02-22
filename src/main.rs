@@ -1,10 +1,5 @@
 extern crate hostname;
-
-mod schema;
-use schema::*;
-
 use anyhow::Result;
-use cdr::{CdrLe, Infinite};
 use chrono::Utc;
 use clap::Parser;
 use futures::Future;
@@ -15,9 +10,22 @@ use std::sync::mpsc::{self, Receiver, Sender};
 use std::time::{SystemTime, UNIX_EPOCH};
 use std::{collections::BTreeMap, error::Error, fs, io::BufWriter, sync::Arc};
 use tokio::time::{timeout, Duration};
-use zenoh::{buffers::reader::HasReader, prelude::r#async::AsyncResolve, Session};
-use zenoh_ros_type::foxglove_msgs::FoxgloveCompressedVideo;
-use zenoh_ros_type::sensor_msgs::{CompressedImage, NavSatFix, PointCloud2, IMU};
+use zenoh::buffers::SplitBuffer;
+use zenoh::prelude::r#async::AsyncResolve;
+use zenoh::sample::Sample;
+use zenoh::subscriber::Subscriber;
+
+pub const FOXGLOVE_MSGS_COMPRESSED_VIDEO: &'static [u8] =
+    include_bytes!("schema/foxglove_msgs/msg/CompressedVideo.msg");
+
+pub const FOXGLOVE_MSGS_COMPRESSED_IMAGE: &'static [u8] =
+    include_bytes!("schema/foxglove_msgs/msg/CompressedImage.msg");
+
+pub const POINTCLOUD_MSGS: &'static [u8] = include_bytes!("schema/PointCloud2.msg");
+
+pub const IMU_MSGS: &'static [u8] = include_bytes!("schema/sensor_msgs/msg/Imu.msg");
+
+pub const GPS_MSGS: &'static [u8] = include_bytes!("schema/sensor_msgs/msg/Gps.msg");
 
 pub const NANO_SEC: u128 = 1000000000;
 
@@ -54,6 +62,9 @@ struct Args {
     /// topic detection timeout in seconds
     #[arg(short, long, default_value = "10")]
     timeout: u64,
+
+    /// List of topics
+    topics: Vec<String>,
 }
 
 async fn run_and_log_err(name: &str, future: impl Future<Output = Result<(), Box<dyn Error>>>) {
@@ -88,58 +99,39 @@ async fn write_to_file(
     }
 }
 
-async fn stream_camera(
-    session: &Session,
+async fn stream(
     channel_id: u16,
     start_time: u128,
     args: &Args,
     tx: Sender<(MessageHeader, Vec<u8>)>,
+    subscriber_topic: Subscriber<'_, flume::Receiver<Sample>>,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let camera_subscriber = session
-        .declare_subscriber(&args.camera_topic)
-        .res()
-        .await
-        .unwrap();
     let mut frame_number = 0;
-
     loop {
         let timeout_duration = Duration::from_secs(args.timeout);
-
-        match timeout(timeout_duration, camera_subscriber.recv_async()).await {
+        match timeout(timeout_duration, subscriber_topic.recv_async()).await {
             Ok(Ok(sample)) => {
-                let compressed_image = cdr::deserialize_from::<_, FoxgloveCompressedVideo, _>(
-                    sample.value.payload.reader(),
-                    Infinite,
-                )?;
-
+                let data = sample.value.payload.contiguous().to_vec();
                 let current_time = SystemTime::now();
                 let duration = current_time
                     .duration_since(UNIX_EPOCH)
                     .expect("Time went backwards");
                 let unix_time_seconds = duration.as_nanos();
-                let serialized_data_result =
-                    cdr::serialize::<_, _, CdrLe>(&compressed_image, Infinite);
+                // println!("channel_id {:?}", channel_id);
 
-                match serialized_data_result {
-                    Ok(serialized_data) => {
-                        let _ = tx.send((
-                            MessageHeader {
-                                channel_id,
-                                sequence: frame_number,
-                                log_time: unix_time_seconds as u64,
-                                publish_time: unix_time_seconds as u64,
-                            },
-                            serialized_data,
-                        ));
-                        frame_number += 1;
+                let _ = tx.send((
+                    MessageHeader {
+                        channel_id,
+                        sequence: frame_number,
+                        log_time: unix_time_seconds as u64,
+                        publish_time: unix_time_seconds as u64,
+                    },
+                    data,
+                ));
+                frame_number += 1;
 
-                        if (unix_time_seconds - start_time) / NANO_SEC >= args.duration {
-                            break;
-                        }
-                    }
-                    Err(err) => {
-                        eprintln!("Serialization error: {:?}", err);
-                    }
+                if (unix_time_seconds - start_time) / NANO_SEC >= args.duration {
+                    break;
                 }
             }
             Ok(Err(_)) => {
@@ -148,213 +140,6 @@ async fn stream_camera(
             }
             Err(_) => {
                 println!("Camera topic not found stopped looking, TIMING OUT");
-                break;
-            }
-        }
-    }
-    return Ok(());
-}
-
-async fn stream_imu(
-    session: &Session,
-    channel_id: u16,
-    start_time: u128,
-    args: &Args,
-    tx: Sender<(MessageHeader, Vec<u8>)>,
-) -> Result<(), Box<dyn std::error::Error>> {
-    let imu_subscriber = session
-        .declare_subscriber(&args.imu_topic)
-        .res()
-        .await
-        .unwrap();
-    let mut frame_number = 0;
-
-    loop {
-        let timeout_duration = Duration::from_secs(args.timeout);
-
-        match timeout(timeout_duration, imu_subscriber.recv_async()).await {
-            Ok(Ok(sample)) => {
-                let compressed_image =
-                    cdr::deserialize_from::<_, IMU, _>(sample.value.payload.reader(), Infinite)?;
-
-                let current_time = SystemTime::now();
-
-                let duration = current_time
-                    .duration_since(UNIX_EPOCH)
-                    .expect("Time went backwards");
-
-                let unix_time_seconds = duration.as_nanos();
-                let serialized_data_result =
-                    cdr::serialize::<_, _, CdrLe>(&compressed_image, Infinite);
-
-                match serialized_data_result {
-                    Ok(serialized_data) => {
-                        let _ = tx.send((
-                            MessageHeader {
-                                channel_id,
-                                sequence: frame_number,
-                                log_time: unix_time_seconds as u64,
-                                publish_time: unix_time_seconds as u64,
-                            },
-                            serialized_data,
-                        ));
-                        frame_number += 1;
-
-                        if (unix_time_seconds - start_time) / NANO_SEC >= args.duration {
-                            break;
-                        }
-                    }
-                    Err(err) => {
-                        eprintln!("Serialization error: {:?}", err);
-                    }
-                }
-            }
-            Ok(Err(_)) => {
-                println!("Timeout occurred while waiting for sample from camera_subscriber");
-                break;
-            }
-            Err(_) => {
-                println!("Imu topic not found stopped looking, TIMING OUT");
-                break;
-            }
-        }
-    }
-    return Ok(());
-}
-
-async fn stream_gps(
-    session: &Session,
-    channel_id: u16,
-    start_time: u128,
-    args: &Args,
-    tx: Sender<(MessageHeader, Vec<u8>)>,
-) -> Result<(), Box<dyn std::error::Error>> {
-    let gps_subscriber = session
-        .declare_subscriber(&args.gps_topic)
-        .res()
-        .await
-        .unwrap();
-    let mut frame_number = 0;
-
-    loop {
-        let timeout_duration = Duration::from_secs(args.timeout);
-
-        match timeout(timeout_duration, gps_subscriber.recv_async()).await {
-            Ok(Ok(sample)) => {
-                let compressed_image = cdr::deserialize_from::<_, NavSatFix, _>(
-                    sample.value.payload.reader(),
-                    Infinite,
-                )?;
-
-                let current_time = SystemTime::now();
-
-                let duration = current_time
-                    .duration_since(UNIX_EPOCH)
-                    .expect("Time went backwards");
-
-                let unix_time_seconds = duration.as_nanos();
-                let serialized_data_result =
-                    cdr::serialize::<_, _, CdrLe>(&compressed_image, Infinite);
-
-                match serialized_data_result {
-                    Ok(serialized_data) => {
-                        let _ = tx.send((
-                            MessageHeader {
-                                channel_id,
-                                sequence: frame_number,
-                                log_time: unix_time_seconds as u64,
-                                publish_time: unix_time_seconds as u64,
-                            },
-                            serialized_data,
-                        ));
-                        frame_number += 1;
-                        if (unix_time_seconds - start_time) / NANO_SEC >= args.duration {
-                            break;
-                        }
-                    }
-                    Err(err) => {
-                        eprintln!("Serialization error: {:?}", err);
-                    }
-                }
-            }
-            Ok(Err(_)) => {
-                println!("Timeout occurred while waiting for sample from camera_subscriber");
-                break;
-            }
-            Err(_) => {
-                println!("Gps topic not found stopped looking, TIMING OUT");
-                break;
-            }
-        }
-    }
-    return Ok(());
-}
-
-async fn stream_radar(
-    session: &Session,
-    channel_id: u16,
-    start_time: u128,
-    args: &Args,
-    tx: Sender<(MessageHeader, Vec<u8>)>,
-) -> Result<(), Box<dyn Error>> {
-    let radar_subscriber = session
-        .declare_subscriber(&args.radar_topic)
-        .res()
-        .await
-        .unwrap();
-
-    let mut frame_number = 0;
-
-    loop {
-        let timeout_duration = Duration::from_secs(args.timeout);
-
-        match timeout(timeout_duration, radar_subscriber.recv_async()).await {
-            Ok(Ok(sample)) => {
-                let points = cdr::deserialize_from::<_, PointCloud2, _>(
-                    sample.value.payload.reader(),
-                    Infinite,
-                )?;
-
-                assert!(points.width as usize == points.data.len() / 16);
-
-                let current_time = SystemTime::now();
-
-                let duration = current_time
-                    .duration_since(UNIX_EPOCH)
-                    .expect("Time went backwards");
-
-                let unix_time_seconds = duration.as_nanos();
-
-                let serialized_data_result = cdr::serialize::<_, _, CdrLe>(&points, Infinite);
-
-                match serialized_data_result {
-                    Ok(serialized_data) => {
-                        let _ = tx.send((
-                            MessageHeader {
-                                channel_id,
-                                sequence: frame_number,
-                                log_time: unix_time_seconds as u64,
-                                publish_time: unix_time_seconds as u64,
-                            },
-                            serialized_data,
-                        ));
-                        frame_number += 1;
-
-                        if (unix_time_seconds - start_time) / NANO_SEC >= args.duration {
-                            break;
-                        }
-                    }
-                    Err(err) => {
-                        eprintln!("Serialization error: {:?}", err);
-                    }
-                }
-            }
-            Ok(Err(_)) => {
-                println!("Timeout occurred while waiting for sample from camera_subscriber");
-                break;
-            }
-            Err(_) => {
-                println!("Radar topic not found stopped looking, TIMING OUT");
                 break;
             }
         }
@@ -396,6 +181,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let current_time = Utc::now();
     let formatted_time = current_time.format("%Y_%m_%d_%H_%M_%S").to_string();
     let result: String;
+
     match hostname::get() {
         Ok(hostname) => {
             if let Some(name) = hostname.to_str() {
@@ -414,31 +200,27 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut out: Writer<'_, BufWriter<fs::File>> =
         Writer::new(BufWriter::new(fs::File::create(result)?))?;
 
-    let image_schema_data: Vec<u8> = VIDEO_SCHEMA_DATA.to_owned();
     let image_channel = get_channel(
         "foxglove_msgs/msg/CompressedVideo",
         &args.camera_topic,
-        image_schema_data,
+        FOXGLOVE_MSGS_COMPRESSED_VIDEO.to_vec(),
     );
     let image_channel_id = out.add_channel(&image_channel)?;
 
-    let radar_schema_data: Vec<u8> = RADAR_SCHEMA_DATA.to_owned();
     let radar_channel = get_channel(
         "sensor_msgs/msg/PointCloud2",
         &args.radar_topic,
-        radar_schema_data,
+        POINTCLOUD_MSGS.to_vec(),
     );
     let radar_channel_id = out.add_channel(&radar_channel)?;
 
-    let imu_schema_data: Vec<u8> = IMU_SCHEMA_DATA.to_owned();
-    let imu_channel = get_channel("sensor_msgs/msg/Imu", &args.imu_topic, imu_schema_data);
+    let imu_channel = get_channel("sensor_msgs/msg/Imu", &args.imu_topic, IMU_MSGS.to_vec());
     let imu_channel_id = out.add_channel(&imu_channel)?;
 
-    let gps_schema_data: Vec<u8> = GPS_SCHEMA_DATA.to_owned();
     let gps_channel = get_channel(
         "sensor_msgs/msg/NavSatFix",
         &args.gps_topic,
-        gps_schema_data,
+        GPS_MSGS.to_vec(),
     );
     let gps_channel_id = out.add_channel(&gps_channel)?;
 
@@ -450,22 +232,70 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .expect("Time went backwards");
     let start_time: u128 = duration.as_nanos();
 
+    let camera_subscriber = session
+        .declare_subscriber(&args.camera_topic)
+        .res()
+        .await
+        .unwrap();
+
+    let radar_subscriber = session
+        .declare_subscriber(&args.radar_topic)
+        .res()
+        .await
+        .unwrap();
+
+    let imu_subscriber = session
+        .declare_subscriber(&args.imu_topic)
+        .res()
+        .await
+        .unwrap();
+
+    let gps_subscriber = session
+        .declare_subscriber(&args.gps_topic)
+        .res()
+        .await
+        .unwrap();
+
     let cam_future = run_and_log_err(
         "Camera",
-        stream_camera(&session, image_channel_id, start_time, &args, tx.clone()),
+        stream(
+            image_channel_id,
+            start_time,
+            &args,
+            tx.clone(),
+            camera_subscriber,
+        ),
     );
     let rad_future = run_and_log_err(
         "Radar",
-        stream_radar(&session, radar_channel_id, start_time, &args, tx.clone()),
+        stream(
+            radar_channel_id,
+            start_time,
+            &args,
+            tx.clone(),
+            radar_subscriber,
+        ),
     );
     let imu_future = run_and_log_err(
         "Imu",
-        stream_imu(&session, imu_channel_id, start_time, &args, tx.clone()),
+        stream(
+            imu_channel_id,
+            start_time,
+            &args,
+            tx.clone(),
+            imu_subscriber,
+        ),
     );
 
     let gps_future = run_and_log_err(
         "Gps",
-        stream_gps(&session, gps_channel_id, start_time, &args, tx.clone()),
+        stream(
+            gps_channel_id,
+            start_time,
+            &args,
+            tx.clone(),
+            gps_subscriber,
+        ),
     );
     drop(tx);
     let write_future = run_and_log_err("Writer", write_to_file(out, rx));

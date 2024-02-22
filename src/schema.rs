@@ -542,3 +542,12 @@ pub const GPS_SCHEMA_DATA: &[u8] = &[
     105, 100, 32, 105, 110, 32, 116, 104, 101, 32, 114, 97, 110, 103, 101, 32, 91, 48, 44, 32, 49,
     48, 101, 57, 41, 46, 10, 117, 105, 110, 116, 51, 50, 32, 110, 97, 110, 111, 115, 101, 99, 10,
 ];
+
+// let gps_schema_data: Vec<u8> = GPS_SCHEMA_DATA.to_owned();
+// let chars: Vec<char> = gps_schema_data.iter().map(|&byte| byte as char).collect();
+
+// // Convert the vector of characters into a String
+// let string: String = chars.iter().collect();
+
+// // Print the result
+// println!("{}", string);

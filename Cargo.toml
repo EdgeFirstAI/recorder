@@ -29,3 +29,4 @@ log = "0.4.20"
 clap = { version = "4.1", features = ["derive"] }
 async-std = {version = "1.12", features = ["attributes"] }
 async-scoped = {version = "0.8.0", features = ["use-async-std"] }
+flume = "0.11.0"

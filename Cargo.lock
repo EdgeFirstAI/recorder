@@ -1489,6 +1489,7 @@ dependencies = [
  "cdr",
  "chrono",
  "clap 4.5.1",
+ "flume",
  "futures",
  "hostname",
  "log",
