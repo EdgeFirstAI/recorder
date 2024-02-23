@@ -62,9 +62,6 @@ struct Args {
     /// topic detection timeout in seconds
     #[arg(short, long, default_value = "10")]
     timeout: u64,
-
-    /// List of topics
-    topics: Vec<String>,
 }
 
 async fn run_and_log_err(name: &str, future: impl Future<Output = Result<(), Box<dyn Error>>>) {
@@ -118,7 +115,6 @@ async fn stream(
                     .duration_since(UNIX_EPOCH)
                     .expect("Time went backwards");
                 let unix_time_seconds = duration.as_nanos();
-                // println!("channel_id {:?}", channel_id);
 
                 let _ = tx.send((
                     MessageHeader {

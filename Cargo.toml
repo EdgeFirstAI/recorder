@@ -1,5 +1,5 @@
 [package]
-name = "maivin-reader"
+name = "maivin-recorder"
 description = "MCAP Reader"
 authors = ["Au-Zone Technologies"]
 version = "0.1.0"
