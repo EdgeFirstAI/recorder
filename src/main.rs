@@ -21,7 +21,7 @@ pub const FOXGLOVE_MSGS_COMPRESSED_VIDEO: &'static [u8] =
 pub const FOXGLOVE_MSGS_COMPRESSED_IMAGE: &'static [u8] =
     include_bytes!("schema/foxglove_msgs/msg/CompressedImage.msg");
 
-pub const POINTCLOUD_MSGS: &'static [u8] = include_bytes!("schema/PointCloud2.msg");
+pub const POINTCLOUD_MSGS: &'static [u8] = include_bytes!("schema/sensor_msgs/msg/PointCloud2.msg");
 
 pub const IMU_MSGS: &'static [u8] = include_bytes!("schema/sensor_msgs/msg/Imu.msg");
 
