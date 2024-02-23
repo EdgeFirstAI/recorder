@@ -105,6 +105,7 @@ async fn stream(
     args: &Args,
     tx: Sender<(MessageHeader, Vec<u8>)>,
     subscriber_topic: Subscriber<'_, flume::Receiver<Sample>>,
+    topic: &str,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let mut frame_number = 0;
     loop {
@@ -139,7 +140,7 @@ async fn stream(
                 break;
             }
             Err(_) => {
-                println!("Camera topic not found stopped looking, TIMING OUT");
+                println!("Topic {:?} not found stopped looking, TIMING OUT", topic);
                 break;
             }
         }
@@ -264,6 +265,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             &args,
             tx.clone(),
             camera_subscriber,
+            &args.camera_topic,
         ),
     );
     let rad_future = run_and_log_err(
@@ -274,6 +276,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             &args,
             tx.clone(),
             radar_subscriber,
+            &args.radar_topic,
         ),
     );
     let imu_future = run_and_log_err(
@@ -284,6 +287,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             &args,
             tx.clone(),
             imu_subscriber,
+            &args.imu_topic,
         ),
     );
 
@@ -295,6 +299,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             &args,
             tx.clone(),
             gps_subscriber,
+            &args.gps_topic,
         ),
     );
     drop(tx);
