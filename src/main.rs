@@ -6,9 +6,11 @@ use futures::Future;
 use mcap::{records::MessageHeader, Channel, Schema, Writer};
 use std::borrow::Cow;
 use std::str::FromStr;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::time::{SystemTime, UNIX_EPOCH};
 use std::{collections::BTreeMap, error::Error, fs, io::BufWriter, sync::Arc};
+use tokio::signal::unix::{signal, SignalKind};
 use tokio::time::{timeout, Duration};
 use zenoh::buffers::SplitBuffer;
 use zenoh::prelude::r#async::AsyncResolve;
@@ -56,8 +58,8 @@ struct Args {
     gps_topic: String,
 
     /// duration for the recording in seconds
-    #[arg(short, long, default_value = "30")]
-    duration: u128,
+    #[arg(short, long)]
+    duration: Option<u128>,
 
     /// topic detection timeout in seconds
     #[arg(short, long, default_value = "10")]
@@ -96,6 +98,12 @@ async fn write_to_file(
     }
 }
 
+async fn handle_ctrl_c(running: Arc<AtomicBool>) {
+    let mut stream = signal(SignalKind::interrupt()).unwrap();
+    stream.recv().await;
+    running.store(false, Ordering::SeqCst);
+}
+
 async fn stream(
     channel_id: u16,
     start_time: u128,
@@ -104,8 +112,18 @@ async fn stream(
     subscriber_topic: Subscriber<'_, flume::Receiver<Sample>>,
     topic: &str,
 ) -> Result<(), Box<dyn std::error::Error>> {
+    let running = Arc::new(AtomicBool::new(true));
+    let running_clone = running.clone();
+    tokio::spawn(handle_ctrl_c(running_clone));
+
     let mut frame_number = 0;
+
     loop {
+        if !running.load(Ordering::SeqCst) {
+            println!("Program stopped finishing writing MCAP.....");
+            break;
+        }
+
         let timeout_duration = Duration::from_secs(args.timeout);
         match timeout(timeout_duration, subscriber_topic.recv_async()).await {
             Ok(Ok(sample)) => {
@@ -127,8 +145,13 @@ async fn stream(
                 ));
                 frame_number += 1;
 
-                if (unix_time_seconds - start_time) / NANO_SEC >= args.duration {
-                    break;
+                match args.duration {
+                    Some(duration) => {
+                        if (unix_time_seconds - start_time) / NANO_SEC >= duration {
+                            break;
+                        }
+                    }
+                    None => {}
                 }
             }
             Ok(Err(_)) => {
@@ -141,7 +164,8 @@ async fn stream(
             }
         }
     }
-    return Ok(());
+
+    Ok(())
 }
 
 fn get_channel<'a>(
