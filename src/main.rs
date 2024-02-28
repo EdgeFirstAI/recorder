@@ -4,18 +4,27 @@ use chrono::Utc;
 use clap::Parser;
 use futures::Future;
 use mcap::{records::MessageHeader, Channel, Schema, Writer};
-use std::borrow::Cow;
-use std::str::FromStr;
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::mpsc::{self, Receiver, Sender};
-use std::time::{SystemTime, UNIX_EPOCH};
-use std::{collections::BTreeMap, error::Error, fs, io::BufWriter, sync::Arc};
-use tokio::signal::unix::{signal, SignalKind};
-use tokio::time::{timeout, Duration};
-use zenoh::buffers::SplitBuffer;
-use zenoh::prelude::r#async::AsyncResolve;
-use zenoh::sample::Sample;
-use zenoh::subscriber::Subscriber;
+use std::{
+    borrow::Cow,
+    collections::BTreeMap,
+    error::Error,
+    fs,
+    io::BufWriter,
+    str::FromStr,
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        mpsc::{self, Receiver, Sender},
+        Arc,
+    },
+    time::{SystemTime, UNIX_EPOCH},
+};
+use tokio::{
+    signal::unix::{signal, SignalKind},
+    time::{timeout, Duration},
+};
+use zenoh::{
+    buffers::SplitBuffer, prelude::r#async::AsyncResolve, sample::Sample, subscriber::Subscriber,
+};
 
 pub const FOXGLOVE_MSGS_COMPRESSED_VIDEO: &'static [u8] =
     include_bytes!("schema/foxglove_msgs/msg/CompressedVideo.msg");

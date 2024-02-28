@@ -8,13 +8,16 @@ use camino::Utf8Path;
 use memmap::Mmap;
 use serde::{Deserialize, Serialize};
 use serde_big_array::BigArray;
-use std::fs;
-use std::io::Error;
-use std::io::ErrorKind;
-use std::result::Result::Ok;
-use zenoh_ros_type::foxglove_msgs::FoxgloveCompressedVideo;
-use zenoh_ros_type::sensor_msgs::{point_field::FLOAT32, Image, NavSatFix, PointCloud2, IMU};
-use zenoh_ros_type::std_msgs::Header;
+use std::{
+    fs,
+    io::{Error, ErrorKind},
+    result::Result::Ok,
+};
+use zenoh_ros_type::{
+    foxglove_msgs::FoxgloveCompressedVideo,
+    sensor_msgs::{point_field::FLOAT32, Image, NavSatFix, PointCloud2, IMU},
+    std_msgs::Header,
+};
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Point {
