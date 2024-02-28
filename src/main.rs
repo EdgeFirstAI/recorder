@@ -3,6 +3,7 @@ use anyhow::Result;
 use chrono::Utc;
 use clap::Parser;
 use futures::Future;
+use log::{info, warn};
 use mcap::{records::MessageHeader, Channel, Schema, Writer};
 use std::{
     borrow::Cow,
@@ -219,8 +220,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let current_time = Utc::now();
     let formatted_time = current_time.format("%Y_%m_%d_%H_%M_%S").to_string();
     let mut result: String;
-    // let storage = std::env::var("STORAGE");
-    // println!("{:?}", storage);
+    env_logger::init();
 
     match hostname::get() {
         Ok(hostname) => {
@@ -228,12 +228,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 result = name.to_owned() + "_" + &formatted_time + ".mcap";
             } else {
                 result = "maivin_mcap_".to_string() + &formatted_time + ".mcap";
-                println!("Hostname is not valid UTF-8, using {:?}", result);
+                warn!("Hostname is not valid UTF-8, using {:?}", result);
             }
         }
         Err(_e) => {
             result = "maivin_mcap_".to_string() + &formatted_time + ".mcap";
-            println!("Failed to get hostname, using {:?}", result);
+            info!("Failed to get hostname, using {:?}", result);
         }
     }
 
@@ -241,11 +241,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         Ok(value) => {
             let path = format!("{}", value);
             if let Err(_) = std::fs::metadata(&path) {
-                println!("Error: No such file or directory at {} EXITING....", value);
+                warn!("Error: No such file or directory at {} EXITING....", value);
                 exit(1);
             } else {
                 result = value.to_string() + "/" + &result;
-                println!(
+                info!(
                     "STORAGE environment variable is set storing MCAP in: {}",
                     value
                 );
@@ -253,7 +253,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
         Err(_) => match std::env::var("PWD") {
             Ok(value) => {
-                println!(
+                info!(
                     "STORAGE environment variable is not set, storing the MCAP in: {:?}",
                     value
                 );

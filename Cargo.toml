@@ -29,3 +29,4 @@ async-std = {version = "1.12", features = ["attributes"] }
 async-scoped = {version = "0.8.0", features = ["use-async-std"] }
 flume = "0.11.0"
 ctrlc = "3.4.0"
+env_logger = "0.9"
