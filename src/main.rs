@@ -28,20 +28,19 @@ use zenoh::{
     buffers::SplitBuffer, prelude::r#async::AsyncResolve, sample::Sample, subscriber::Subscriber,
 };
 
-pub const FOXGLOVE_MSGS_COMPRESSED_VIDEO: &'static [u8] =
+pub const FOXGLOVE_MSGS_COMPRESSED_VIDEO: &[u8] =
     include_bytes!("schema/foxglove_msgs/msg/CompressedVideo.msg");
 
-pub const FOXGLOVE_MSGS_COMPRESSED_IMAGE: &'static [u8] =
+pub const FOXGLOVE_MSGS_COMPRESSED_IMAGE: &[u8] =
     include_bytes!("schema/foxglove_msgs/msg/CompressedImage.msg");
 
-pub const POINTCLOUD_MSGS: &'static [u8] = include_bytes!("schema/sensor_msgs/msg/PointCloud2.msg");
+pub const POINTCLOUD_MSGS: &[u8] = include_bytes!("schema/sensor_msgs/msg/PointCloud2.msg");
 
-pub const IMU_MSGS: &'static [u8] = include_bytes!("schema/sensor_msgs/msg/Imu.msg");
+pub const IMU_MSGS: &[u8] = include_bytes!("schema/sensor_msgs/msg/Imu.msg");
 
-pub const GPS_MSGS: &'static [u8] = include_bytes!("schema/sensor_msgs/msg/Gps.msg");
+pub const GPS_MSGS: &[u8] = include_bytes!("schema/sensor_msgs/msg/Gps.msg");
 
-pub const BOXES_MSGS: &'static [u8] =
-    include_bytes!("schema/foxglove_msgs/msg/ImageAnnotation.msg");
+pub const BOXES_MSGS: &[u8] = include_bytes!("schema/foxglove_msgs/msg/ImageAnnotation.msg");
 
 pub const NANO_SEC: u128 = 1000000000;
 
@@ -239,10 +238,19 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     match std::env::var("STORAGE") {
         Ok(value) => {
-            let path = format!("{}", value);
-            if let Err(_) = std::fs::metadata(&path) {
-                warn!("Error: No such file or directory at {} EXITING....", value);
-                exit(1);
+            if let Err(_) = std::fs::metadata(&value) {
+                let value_clone = value.clone();
+                warn!("Error: No such directory: {}", value);
+                match fs::create_dir_all(value) {
+                    Ok(()) => {
+                        info!("Directory created successfully.");
+                        result = value_clone.to_string() + "/" + &result;
+                    }
+                    Err(_) => {
+                        println!("Failed to create directory {} EXITING.... ", value_clone);
+                        exit(-1);
+                    }
+                }
             } else {
                 result = value.to_string() + "/" + &result;
                 info!(
@@ -381,7 +389,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     );
 
     let boxes_future = run_and_log_err(
-        "Gps",
+        "Boxes",
         stream(
             boxes_channel_id,
             start_time,
