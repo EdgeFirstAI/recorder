@@ -10,6 +10,7 @@ use std::{
     error::Error,
     fs,
     io::BufWriter,
+    process::exit,
     str::FromStr,
     sync::{
         atomic::{AtomicBool, Ordering},
@@ -238,11 +239,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     match std::env::var("STORAGE") {
         Ok(value) => {
-            result = value.to_string() + "/" + &result;
-            println!(
-                "STORAGE environment variable is set storing MCAP in: {}",
-                result
-            );
+            let path = format!("{}", value);
+            if let Err(_) = std::fs::metadata(&path) {
+                println!("Error: No such file or directory at {} EXITING....", value);
+                exit(1);
+            } else {
+                result = value.to_string() + "/" + &result;
+                println!(
+                    "STORAGE environment variable is set storing MCAP in: {}",
+                    value
+                );
+            }
         }
         Err(_) => match std::env::var("PWD") {
             Ok(value) => {
