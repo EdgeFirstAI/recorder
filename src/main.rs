@@ -238,36 +238,29 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     match std::env::var("STORAGE") {
         Ok(value) => {
-            if let Err(_) = std::fs::metadata(&value) {
-                let value_clone = value.clone();
-                warn!("Error: No such directory: {}", value);
-                match fs::create_dir_all(value) {
-                    Ok(()) => {
-                        info!("Directory created successfully.");
-                        result = value_clone.to_string() + "/" + &result;
-                    }
-                    Err(_) => {
-                        println!("Failed to create directory {} EXITING.... ", value_clone);
-                        exit(-1);
-                    }
+            match fs::create_dir_all(&value) {
+                Ok(()) => {
+                    info!("Directory {} created successfully.", value);
                 }
-            } else {
-                result = value.to_string() + "/" + &result;
-                info!(
-                    "STORAGE environment variable is set storing MCAP in: {}",
-                    value
-                );
+                Err(_) => {
+                    println!("Failed to create directory {} EXITING.... ", value);
+                    exit(-1);
+                }
             }
+
+            result = value.to_string() + "/" + &result;
+            info!(
+                "STORAGE environment variable is set storing MCAP in: {}",
+                value
+            );
         }
-        Err(_) => match std::env::var("PWD") {
-            Ok(value) => {
-                info!(
-                    "STORAGE environment variable is not set, storing the MCAP in: {:?}",
-                    value
-                );
-            }
-            Err(_) => println!("Error"),
-        },
+        Err(_) => {
+            let path = std::env::current_dir()?;
+            info!(
+                "STORAGE environment variable is not set, storing the MCAP in: {:?}",
+                path
+            );
+        }
     }
 
     let mut out: Writer<'_, BufWriter<fs::File>> =
