@@ -3,7 +3,7 @@ use anyhow::Result;
 use chrono::Utc;
 use clap::Parser;
 use futures::Future;
-use log::{info, warn};
+use log::{error, info, warn};
 use mcap::{records::MessageHeader, Channel, Schema, Writer};
 use std::{
     borrow::Cow,
@@ -42,7 +42,7 @@ pub const GPS_MSGS: &[u8] = include_bytes!("schema/sensor_msgs/msg/Gps.msg");
 
 pub const BOXES_MSGS: &[u8] = include_bytes!("schema/foxglove_msgs/msg/ImageAnnotation.msg");
 
-pub const NANO_SEC: u128 = 1000000000;
+pub const NANO_SEC: u128 = 1_000_000_000;
 
 #[derive(Parser, Debug)]
 struct Args {
@@ -243,7 +243,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     info!("Directory {} created successfully.", value);
                 }
                 Err(_) => {
-                    println!("Failed to create directory {} EXITING.... ", value);
+                    error!("Failed to create directory {}", value);
                     exit(-1);
                 }
             }
