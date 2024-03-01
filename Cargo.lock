@@ -835,6 +835,19 @@ dependencies = [
 
 [[package]]
 name = "env_logger"
+version = "0.9.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a12e6657c4c97ebab115a42dcee77225f7f482cdd841cf7088c657a42e9e00e7"
+dependencies = [
+ "atty",
+ "humantime",
+ "log",
+ "regex",
+ "termcolor",
+]
+
+[[package]]
+name = "env_logger"
 version = "0.10.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4cd405aab171cb85d6735e5c8d9db038c17d3ca007a4d2c25f337935c3d90580"
@@ -1500,6 +1513,7 @@ dependencies = [
  "chrono",
  "clap 4.5.1",
  "ctrlc",
+ "env_logger 0.9.3",
  "flume",
  "futures",
  "hostname",
@@ -3223,7 +3237,7 @@ dependencies = [
  "async-std",
  "async-trait",
  "base64",
- "env_logger",
+ "env_logger 0.10.2",
  "event-listener 2.5.3",
  "flume",
  "form_urlencoded",

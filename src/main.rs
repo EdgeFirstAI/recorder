@@ -3,6 +3,7 @@ use anyhow::Result;
 use chrono::Utc;
 use clap::Parser;
 use futures::Future;
+use log::{error, info, warn};
 use mcap::{records::MessageHeader, Channel, Schema, Writer};
 use std::{
     borrow::Cow,
@@ -10,6 +11,7 @@ use std::{
     error::Error,
     fs,
     io::BufWriter,
+    process::exit,
     str::FromStr,
     sync::{
         atomic::{AtomicBool, Ordering},
@@ -26,19 +28,21 @@ use zenoh::{
     buffers::SplitBuffer, prelude::r#async::AsyncResolve, sample::Sample, subscriber::Subscriber,
 };
 
-pub const FOXGLOVE_MSGS_COMPRESSED_VIDEO: &'static [u8] =
+pub const FOXGLOVE_MSGS_COMPRESSED_VIDEO: &[u8] =
     include_bytes!("schema/foxglove_msgs/msg/CompressedVideo.msg");
 
-pub const FOXGLOVE_MSGS_COMPRESSED_IMAGE: &'static [u8] =
+pub const FOXGLOVE_MSGS_COMPRESSED_IMAGE: &[u8] =
     include_bytes!("schema/foxglove_msgs/msg/CompressedImage.msg");
 
-pub const POINTCLOUD_MSGS: &'static [u8] = include_bytes!("schema/sensor_msgs/msg/PointCloud2.msg");
+pub const POINTCLOUD_MSGS: &[u8] = include_bytes!("schema/sensor_msgs/msg/PointCloud2.msg");
 
-pub const IMU_MSGS: &'static [u8] = include_bytes!("schema/sensor_msgs/msg/Imu.msg");
+pub const IMU_MSGS: &[u8] = include_bytes!("schema/sensor_msgs/msg/Imu.msg");
 
-pub const GPS_MSGS: &'static [u8] = include_bytes!("schema/sensor_msgs/msg/Gps.msg");
+pub const GPS_MSGS: &[u8] = include_bytes!("schema/sensor_msgs/msg/Gps.msg");
 
-pub const NANO_SEC: u128 = 1000000000;
+pub const BOXES_MSGS: &[u8] = include_bytes!("schema/foxglove_msgs/msg/ImageAnnotation.msg");
+
+pub const NANO_SEC: u128 = 1_000_000_000;
 
 #[derive(Parser, Debug)]
 struct Args {
@@ -65,6 +69,10 @@ struct Args {
     /// gps topic
     #[arg(short, long, default_value = "rt/gps")]
     gps_topic: String,
+
+    /// boxes topic
+    #[arg(short, long, default_value = "rt/detect/boxes2d")]
+    boxes_topic: String,
 
     /// duration for the recording in seconds
     #[arg(short, long)]
@@ -210,7 +218,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let current_time = Utc::now();
     let formatted_time = current_time.format("%Y_%m_%d_%H_%M_%S").to_string();
-    let result: String;
+    let mut result: String;
+    env_logger::init();
 
     match hostname::get() {
         Ok(hostname) => {
@@ -218,12 +227,39 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 result = name.to_owned() + "_" + &formatted_time + ".mcap";
             } else {
                 result = "maivin_mcap_".to_string() + &formatted_time + ".mcap";
-                println!("Hostname is not valid UTF-8, using {:?}", result);
+                warn!("Hostname is not valid UTF-8, using {:?}", result);
             }
         }
         Err(_e) => {
             result = "maivin_mcap_".to_string() + &formatted_time + ".mcap";
-            println!("Failed to get hostname, using {:?}", result);
+            info!("Failed to get hostname, using {:?}", result);
+        }
+    }
+
+    match std::env::var("STORAGE") {
+        Ok(value) => {
+            match fs::create_dir_all(&value) {
+                Ok(()) => {
+                    info!("Directory {} created successfully.", value);
+                }
+                Err(_) => {
+                    error!("Failed to create directory {}", value);
+                    exit(-1);
+                }
+            }
+
+            result = value.to_string() + "/" + &result;
+            info!(
+                "STORAGE environment variable is set storing MCAP in: {}",
+                value
+            );
+        }
+        Err(_) => {
+            let path = std::env::current_dir()?;
+            info!(
+                "STORAGE environment variable is not set, storing the MCAP in: {:?}",
+                path
+            );
         }
     }
 
@@ -254,6 +290,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     );
     let gps_channel_id = out.add_channel(&gps_channel)?;
 
+    let boxes_channel = get_channel(
+        "foxglove_msgs/msg/ImageAnnotations",
+        &args.boxes_topic,
+        BOXES_MSGS.to_vec(),
+    );
+    let boxes_channel_id = out.add_channel(&boxes_channel)?;
+
     let (tx, rx) = mpsc::channel();
 
     let current_time = SystemTime::now();
@@ -282,6 +325,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let gps_subscriber = session
         .declare_subscriber(&args.gps_topic)
+        .res()
+        .await
+        .unwrap();
+
+    let boxes_subscriber = session
+        .declare_subscriber(&args.boxes_topic)
         .res()
         .await
         .unwrap();
@@ -331,6 +380,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             &args.gps_topic,
         ),
     );
+
+    let boxes_future = run_and_log_err(
+        "Boxes",
+        stream(
+            boxes_channel_id,
+            start_time,
+            &args,
+            tx.clone(),
+            boxes_subscriber,
+            &args.boxes_topic,
+        ),
+    );
     drop(tx);
     let write_future = run_and_log_err("Writer", write_to_file(out, rx));
     let (_, _) = async_scoped::AsyncStdScope::scope_and_block(|s| {
@@ -338,6 +399,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         s.spawn(rad_future);
         s.spawn(imu_future);
         s.spawn(gps_future);
+        s.spawn(boxes_future);
         s.spawn(write_future);
     });
 
