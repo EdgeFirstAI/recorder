@@ -7,7 +7,7 @@ use log::{error, info, warn};
 use mcap::{records::MessageHeader, Channel, Schema, Writer};
 use std::{
     borrow::Cow,
-    collections::BTreeMap,
+    collections::{BTreeMap, HashMap},
     error::Error,
     fs,
     io::BufWriter,
@@ -42,7 +42,14 @@ pub const GPS_MSGS: &[u8] = include_bytes!("schema/sensor_msgs/msg/Gps.msg");
 
 pub const BOXES_MSGS: &[u8] = include_bytes!("schema/foxglove_msgs/msg/ImageAnnotation.msg");
 
-pub const NANO_SEC: u128 = 1_000_000_000;
+const FOXGLOVE_MSGS_COMPRESSED_VIDEO_KEY: &str = "foxglove_msgs/msg/CompressedVideo";
+const FOXGLOVE_MSGS_COMPRESSED_IMAGE_KEY: &str = "sensor_msgs/msg/CompressedImage";
+const POINTCLOUD_MSGS_KEY: &str = "sensor_msgs/msg/PointCloud2";
+const IMU_MSGS_KEY: &str = "sensor_msgs/msg/Imu";
+const GPS_MSGS_KEY: &str = "sensor_msgs/msg/NavSatFix";
+const BOXES_MSGS_KEY: &str = "foxglove_msgs/msg/ImageAnnotations";
+
+pub const NANO_SEC: u128 = 1000000000;
 
 #[derive(Parser, Debug)]
 struct Args {
@@ -54,26 +61,6 @@ struct Args {
     #[arg(short, long)]
     endpoint: Vec<String>,
 
-    /// camera topic
-    #[arg(short, long, default_value = "rt/camera/compressed")]
-    camera_topic: String,
-
-    /// radar topic
-    #[arg(short, long, default_value = "rt/radar/targets0")]
-    radar_topic: String,
-
-    /// imu topic
-    #[arg(short, long, default_value = "rt/imu")]
-    imu_topic: String,
-
-    /// gps topic
-    #[arg(short, long, default_value = "rt/gps")]
-    gps_topic: String,
-
-    /// boxes topic
-    #[arg(short, long, default_value = "rt/detect/boxes2d")]
-    boxes_topic: String,
-
     /// duration for the recording in seconds
     #[arg(short, long)]
     duration: Option<u128>,
@@ -81,6 +68,9 @@ struct Args {
     /// topic detection timeout in seconds
     #[arg(short, long, default_value = "10")]
     timeout: u64,
+
+    /// topics
+    topics: Vec<String>,
 }
 
 async fn run_and_log_err(name: &str, future: impl Future<Output = Result<(), Box<dyn Error>>>) {
@@ -137,7 +127,7 @@ async fn stream(
 
     loop {
         if !running.load(Ordering::SeqCst) {
-            println!("Program stopped finishing writing MCAP.....");
+            info!("Program stopped finishing writing MCAP.....");
             break;
         }
 
@@ -172,11 +162,11 @@ async fn stream(
                 }
             }
             Ok(Err(_)) => {
-                println!("Timeout occurred while waiting for sample from camera_subscriber");
+                info!("Timeout occurred while waiting for sample from camera_subscriber");
                 break;
             }
             Err(_) => {
-                println!("Topic {:?} not found stopped looking, TIMING OUT", topic);
+                warn!("Topic {:?} not found stopped looking, TIMING OUT", topic);
                 break;
             }
         }
@@ -205,22 +195,40 @@ fn get_channel<'a>(
     image_channel
 }
 
-#[async_std::main]
-async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let args = Args::parse();
-    let mut zenoh_config = zenoh::config::Config::default();
+fn create_hash_map() -> HashMap<&'static str, &'static [u8]> {
+    let mut byte_arrays: HashMap<&str, &[u8]> = HashMap::new();
 
-    let mode = zenoh::scouting::WhatAmI::from_str(&args.mode)?;
-    zenoh_config.set_mode(Some(mode)).unwrap();
-    zenoh_config.connect.endpoints = args.endpoint.iter().map(|v| v.parse().unwrap()).collect();
+    byte_arrays.insert(
+        FOXGLOVE_MSGS_COMPRESSED_VIDEO_KEY,
+        include_bytes!("schema/foxglove_msgs/msg/CompressedVideo.msg"),
+    );
+    byte_arrays.insert(
+        FOXGLOVE_MSGS_COMPRESSED_IMAGE_KEY,
+        include_bytes!("schema/foxglove_msgs/msg/CompressedImage.msg"),
+    );
+    byte_arrays.insert(
+        POINTCLOUD_MSGS_KEY,
+        include_bytes!("schema/sensor_msgs/msg/PointCloud2.msg"),
+    );
+    byte_arrays.insert(
+        IMU_MSGS_KEY,
+        include_bytes!("schema/sensor_msgs/msg/Imu.msg"),
+    );
+    byte_arrays.insert(
+        GPS_MSGS_KEY,
+        include_bytes!("schema/sensor_msgs/msg/Gps.msg"),
+    );
+    byte_arrays.insert(
+        BOXES_MSGS_KEY,
+        include_bytes!("schema/foxglove_msgs/msg/ImageAnnotation.msg"),
+    );
+    return byte_arrays;
+}
 
-    let session = zenoh::open(zenoh_config).res().await.unwrap();
-
+fn get_file_name() -> Result<String, Box<dyn std::error::Error>> {
     let current_time = Utc::now();
     let formatted_time = current_time.format("%Y_%m_%d_%H_%M_%S").to_string();
     let mut result: String;
-    env_logger::init();
-
     match hostname::get() {
         Ok(hostname) => {
             if let Some(name) = hostname.to_str() {
@@ -253,6 +261,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 "STORAGE environment variable is set storing MCAP in: {}",
                 value
             );
+            Ok(result)
         }
         Err(_) => {
             let path = std::env::current_dir()?;
@@ -260,42 +269,36 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 "STORAGE environment variable is not set, storing the MCAP in: {:?}",
                 path
             );
+            Ok(result)
         }
     }
+}
 
-    let mut out: Writer<'_, BufWriter<fs::File>> =
-        Writer::new(BufWriter::new(fs::File::create(result)?))?;
+#[async_std::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let args = Args::parse();
+    let mut zenoh_config = zenoh::config::Config::default();
 
-    let image_channel = get_channel(
-        "foxglove_msgs/msg/CompressedVideo",
-        &args.camera_topic,
-        FOXGLOVE_MSGS_COMPRESSED_VIDEO.to_vec(),
-    );
-    let image_channel_id = out.add_channel(&image_channel)?;
+    let mode = zenoh::scouting::WhatAmI::from_str(&args.mode)?;
+    zenoh_config.set_mode(Some(mode)).unwrap();
+    zenoh_config.connect.endpoints = args.endpoint.iter().map(|v| v.parse().unwrap()).collect();
 
-    let radar_channel = get_channel(
-        "sensor_msgs/msg/PointCloud2",
-        &args.radar_topic,
-        POINTCLOUD_MSGS.to_vec(),
-    );
-    let radar_channel_id = out.add_channel(&radar_channel)?;
+    let session = zenoh::open(zenoh_config).res().await.unwrap();
+    let byte_arrays = create_hash_map();
 
-    let imu_channel = get_channel("sensor_msgs/msg/Imu", &args.imu_topic, IMU_MSGS.to_vec());
-    let imu_channel_id = out.add_channel(&imu_channel)?;
-
-    let gps_channel = get_channel(
-        "sensor_msgs/msg/NavSatFix",
-        &args.gps_topic,
-        GPS_MSGS.to_vec(),
-    );
-    let gps_channel_id = out.add_channel(&gps_channel)?;
-
-    let boxes_channel = get_channel(
-        "foxglove_msgs/msg/ImageAnnotations",
-        &args.boxes_topic,
-        BOXES_MSGS.to_vec(),
-    );
-    let boxes_channel_id = out.add_channel(&boxes_channel)?;
+    let mut cloned_msg_type_vec = Vec::new();
+    let mut out: Writer<'_, BufWriter<fs::File>>;
+    let file_name;
+    match get_file_name() {
+        Ok(r) => {
+            file_name = r.clone();
+            out = Writer::new(BufWriter::new(fs::File::create(r)?))?;
+        }
+        Err(_) => {
+            error!("File name invalid");
+            exit(-1);
+        }
+    };
 
     let (tx, rx) = mpsc::channel();
 
@@ -305,103 +308,59 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .expect("Time went backwards");
     let start_time: u128 = duration.as_nanos();
 
-    let camera_subscriber = session
-        .declare_subscriber(&args.camera_topic)
-        .res()
-        .await
-        .unwrap();
+    for topic in &args.topics {
+        let subscriber = session.declare_subscriber(topic).res().await.unwrap();
+        let msg_type: Option<String> = match subscriber.recv_timeout(Duration::from_secs(2)) {
+            Ok(sample) => match String::try_from(sample.encoding.suffix()) {
+                Ok(v) => Some(v),
+                Err(_) => None,
+            },
+            Err(_) => {
+                warn!("Did not find schema");
+                None
+            }
+        };
+        cloned_msg_type_vec.push(msg_type);
+    }
+    assert!(args.topics.len() == cloned_msg_type_vec.len());
+    let mut futures = Vec::new();
+    for idx in 0..args.topics.len() {
+        let topic = &args.topics[idx];
+        let msg_type = &cloned_msg_type_vec[idx];
+        match msg_type {
+            Some(mtype) => {
+                if let Some(compressed_video) = byte_arrays.get(mtype.as_str()) {
+                    let channel = get_channel(mtype, topic, compressed_video.to_vec());
+                    let channel_id = out.add_channel(&channel)?;
 
-    let radar_subscriber = session
-        .declare_subscriber(&args.radar_topic)
-        .res()
-        .await
-        .unwrap();
+                    let subscriber = session.declare_subscriber(topic).res().await.unwrap();
 
-    let imu_subscriber = session
-        .declare_subscriber(&args.imu_topic)
-        .res()
-        .await
-        .unwrap();
+                    futures.push(run_and_log_err(
+                        topic,
+                        stream(
+                            channel_id,
+                            start_time,
+                            &args,
+                            tx.clone(),
+                            subscriber,
+                            &topic,
+                        ),
+                    ));
+                }
+            }
+            None => continue,
+        }
+    }
 
-    let gps_subscriber = session
-        .declare_subscriber(&args.gps_topic)
-        .res()
-        .await
-        .unwrap();
-
-    let boxes_subscriber = session
-        .declare_subscriber(&args.boxes_topic)
-        .res()
-        .await
-        .unwrap();
-
-    let cam_future = run_and_log_err(
-        "Camera",
-        stream(
-            image_channel_id,
-            start_time,
-            &args,
-            tx.clone(),
-            camera_subscriber,
-            &args.camera_topic,
-        ),
-    );
-    let rad_future = run_and_log_err(
-        "Radar",
-        stream(
-            radar_channel_id,
-            start_time,
-            &args,
-            tx.clone(),
-            radar_subscriber,
-            &args.radar_topic,
-        ),
-    );
-    let imu_future = run_and_log_err(
-        "Imu",
-        stream(
-            imu_channel_id,
-            start_time,
-            &args,
-            tx.clone(),
-            imu_subscriber,
-            &args.imu_topic,
-        ),
-    );
-
-    let gps_future = run_and_log_err(
-        "Gps",
-        stream(
-            gps_channel_id,
-            start_time,
-            &args,
-            tx.clone(),
-            gps_subscriber,
-            &args.gps_topic,
-        ),
-    );
-
-    let boxes_future = run_and_log_err(
-        "Boxes",
-        stream(
-            boxes_channel_id,
-            start_time,
-            &args,
-            tx.clone(),
-            boxes_subscriber,
-            &args.boxes_topic,
-        ),
-    );
     drop(tx);
     let write_future = run_and_log_err("Writer", write_to_file(out, rx));
+
     let (_, _) = async_scoped::AsyncStdScope::scope_and_block(|s| {
-        s.spawn(cam_future);
-        s.spawn(rad_future);
-        s.spawn(imu_future);
-        s.spawn(gps_future);
-        s.spawn(boxes_future);
+        for future in futures {
+            s.spawn(future);
+        }
         s.spawn(write_future);
     });
-
+    info!("Saved MCAP at {:?}", file_name);
     Ok(())
 }

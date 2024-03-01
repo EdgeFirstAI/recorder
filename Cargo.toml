@@ -2,7 +2,7 @@
 name = "maivin-recorder"
 description = "Maivin MCAP Recorder"
 authors = ["Au-Zone Technologies"]
-version = "0.0.0"
+version = "0.1.0"
 edition = "2021"
 
 [lib]
