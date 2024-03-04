@@ -25,22 +25,22 @@ use tokio::{
     time::{timeout, Duration},
 };
 use zenoh::{
-    buffers::SplitBuffer, prelude::r#async::AsyncResolve, sample::Sample, subscriber::Subscriber,
+    buffers::SplitBuffer,
+    config::{Config, WhatAmI},
+    prelude::r#async::AsyncResolve,
+    sample::Sample,
+    subscriber::Subscriber,
 };
 
 pub const FOXGLOVE_MSGS_COMPRESSED_VIDEO: &[u8] =
     include_bytes!("schema/foxglove_msgs/msg/CompressedVideo.msg");
-
 pub const FOXGLOVE_MSGS_COMPRESSED_IMAGE: &[u8] =
     include_bytes!("schema/foxglove_msgs/msg/CompressedImage.msg");
-
 pub const POINTCLOUD_MSGS: &[u8] = include_bytes!("schema/sensor_msgs/msg/PointCloud2.msg");
-
 pub const IMU_MSGS: &[u8] = include_bytes!("schema/sensor_msgs/msg/Imu.msg");
-
 pub const GPS_MSGS: &[u8] = include_bytes!("schema/sensor_msgs/msg/Gps.msg");
-
 pub const BOXES_MSGS: &[u8] = include_bytes!("schema/foxglove_msgs/msg/ImageAnnotation.msg");
+pub const CAMERA_INFO_MSGS: &[u8] = include_bytes!("schema/sensor_msgs/msg/CameraInfo.msg");
 
 const FOXGLOVE_MSGS_COMPRESSED_VIDEO_KEY: &str = "foxglove_msgs/msg/CompressedVideo";
 const FOXGLOVE_MSGS_COMPRESSED_IMAGE_KEY: &str = "sensor_msgs/msg/CompressedImage";
@@ -48,25 +48,30 @@ const POINTCLOUD_MSGS_KEY: &str = "sensor_msgs/msg/PointCloud2";
 const IMU_MSGS_KEY: &str = "sensor_msgs/msg/Imu";
 const GPS_MSGS_KEY: &str = "sensor_msgs/msg/NavSatFix";
 const BOXES_MSGS_KEY: &str = "foxglove_msgs/msg/ImageAnnotations";
+const CAMERA_INFO_MSGS_KEY: &str = "sensor_msgs/msg/CameraInfo";
 
-pub const NANO_SEC: u128 = 1000000000;
+pub const NANO_SEC: u128 = 1_000_000_000;
 
 #[derive(Parser, Debug)]
 struct Args {
     /// zenoh connection mode
-    #[arg(short, long, default_value = "peer")]
+    #[arg(short, long, default_value = "client")]
     mode: String,
 
     /// connect to endpoint
+    #[arg(short, long, default_value = "tcp/127.0.0.1:7447")]
+    endpoints: Vec<String>,
+
+    /// listen to endpoint
     #[arg(short, long)]
-    endpoint: Vec<String>,
+    listen: Vec<String>,
 
     /// duration for the recording in seconds
     #[arg(short, long)]
     duration: Option<u128>,
 
     /// topic detection timeout in seconds
-    #[arg(short, long, default_value = "10")]
+    #[arg(short, long, default_value = "3")]
     timeout: u64,
 
     /// topics
@@ -130,10 +135,8 @@ async fn stream(
             info!("Program stopped finishing writing MCAP.....");
             break;
         }
-
-        let timeout_duration = Duration::from_secs(args.timeout);
-        match timeout(timeout_duration, subscriber_topic.recv_async()).await {
-            Ok(Ok(sample)) => {
+        match subscriber_topic.recv_timeout(Duration::from_secs(5)) {
+            Ok(sample) => {
                 let data = sample.value.payload.contiguous().to_vec();
                 let current_time = SystemTime::now();
                 let duration = current_time
@@ -152,21 +155,14 @@ async fn stream(
                 ));
                 frame_number += 1;
 
-                match args.duration {
-                    Some(duration) => {
-                        if (unix_time_seconds - start_time) / NANO_SEC >= duration {
-                            break;
-                        }
+                if let Some(duration) = args.duration {
+                    if (unix_time_seconds - start_time) / NANO_SEC >= duration {
+                        break;
                     }
-                    None => {}
                 }
             }
-            Ok(Err(_)) => {
-                info!("Timeout occurred while waiting for sample from camera_subscriber");
-                break;
-            }
             Err(_) => {
-                warn!("Topic {:?} not found stopped looking, TIMING OUT", topic);
+                warn!("Lost {:?} topic", topic);
                 break;
             }
         }
@@ -197,32 +193,20 @@ fn get_channel<'a>(
 
 fn create_hash_map() -> HashMap<&'static str, &'static [u8]> {
     let mut byte_arrays: HashMap<&str, &[u8]> = HashMap::new();
-
     byte_arrays.insert(
         FOXGLOVE_MSGS_COMPRESSED_VIDEO_KEY,
-        include_bytes!("schema/foxglove_msgs/msg/CompressedVideo.msg"),
+        FOXGLOVE_MSGS_COMPRESSED_VIDEO,
     );
     byte_arrays.insert(
         FOXGLOVE_MSGS_COMPRESSED_IMAGE_KEY,
-        include_bytes!("schema/foxglove_msgs/msg/CompressedImage.msg"),
+        FOXGLOVE_MSGS_COMPRESSED_IMAGE,
     );
-    byte_arrays.insert(
-        POINTCLOUD_MSGS_KEY,
-        include_bytes!("schema/sensor_msgs/msg/PointCloud2.msg"),
-    );
-    byte_arrays.insert(
-        IMU_MSGS_KEY,
-        include_bytes!("schema/sensor_msgs/msg/Imu.msg"),
-    );
-    byte_arrays.insert(
-        GPS_MSGS_KEY,
-        include_bytes!("schema/sensor_msgs/msg/Gps.msg"),
-    );
-    byte_arrays.insert(
-        BOXES_MSGS_KEY,
-        include_bytes!("schema/foxglove_msgs/msg/ImageAnnotation.msg"),
-    );
-    return byte_arrays;
+    byte_arrays.insert(POINTCLOUD_MSGS_KEY, POINTCLOUD_MSGS);
+    byte_arrays.insert(IMU_MSGS_KEY, IMU_MSGS);
+    byte_arrays.insert(GPS_MSGS_KEY, GPS_MSGS);
+    byte_arrays.insert(BOXES_MSGS_KEY, BOXES_MSGS);
+    byte_arrays.insert(CAMERA_INFO_MSGS_KEY, CAMERA_INFO_MSGS);
+    byte_arrays
 }
 
 fn get_file_name() -> Result<String, Box<dyn std::error::Error>> {
@@ -277,16 +261,69 @@ fn get_file_name() -> Result<String, Box<dyn std::error::Error>> {
 #[async_std::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args = Args::parse();
-    let mut zenoh_config = zenoh::config::Config::default();
-
-    let mode = zenoh::scouting::WhatAmI::from_str(&args.mode)?;
-    zenoh_config.set_mode(Some(mode)).unwrap();
-    zenoh_config.connect.endpoints = args.endpoint.iter().map(|v| v.parse().unwrap()).collect();
-
-    let session = zenoh::open(zenoh_config).res().await.unwrap();
     let byte_arrays = create_hash_map();
+    let mut config = Config::default();
+
+    let mode = WhatAmI::from_str(&args.mode).unwrap();
+    config.set_mode(Some(mode)).unwrap();
+    config.connect.endpoints = args.endpoints.iter().map(|v| v.parse().unwrap()).collect();
+    config.listen.endpoints = args.listen.iter().map(|v| v.parse().unwrap()).collect();
+    let _ = config.scouting.multicast.set_enabled(Some(false));
+
+    let session = zenoh::open(config).res_async().await.unwrap();
+
+    env_logger::init();
 
     let mut cloned_msg_type_vec = Vec::new();
+    let (tx, rx) = mpsc::channel();
+
+    for topic in &args.topics {
+        let subscriber = match timeout(
+            Duration::from_secs(args.timeout),
+            session.declare_subscriber(topic).res(),
+        )
+        .await
+        {
+            Ok(result) => match result {
+                Ok(subscriber) => subscriber,
+                Err(err) => {
+                    panic!("Error declaring subscriber: {:?}", err);
+                }
+            },
+            Err(_) => {
+                continue;
+            }
+        };
+
+        let msg_type: Option<String> =
+            match subscriber.recv_timeout(Duration::from_secs(args.timeout)) {
+                Ok(sample) => match String::from_str(sample.encoding.suffix()) {
+                    Ok(v) => {
+                        info!("Received message type: {}", v);
+                        Some(v)
+                    }
+                    Err(_) => None,
+                },
+                Err(_) => {
+                    warn!(
+                        "Timeout occurred while waiting for a message on topic {:?}",
+                        topic
+                    );
+                    None
+                }
+            };
+        cloned_msg_type_vec.push(msg_type);
+    }
+
+    info!("Subscribed to {:?} ", cloned_msg_type_vec);
+    let is_msg_type_none = cloned_msg_type_vec.iter().all(|x| x.is_none());
+    if is_msg_type_none {
+        info!("Found no topic schema exiting");
+        exit(-1);
+    }
+    assert!(args.topics.len() == cloned_msg_type_vec.len());
+    let mut futures = Vec::new();
+
     let mut out: Writer<'_, BufWriter<fs::File>>;
     let file_name;
     match get_file_name() {
@@ -299,32 +336,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             exit(-1);
         }
     };
-
-    let (tx, rx) = mpsc::channel();
-
     let current_time = SystemTime::now();
     let duration = current_time
         .duration_since(UNIX_EPOCH)
         .expect("Time went backwards");
     let start_time: u128 = duration.as_nanos();
 
-    for topic in &args.topics {
-        let subscriber = session.declare_subscriber(topic).res().await.unwrap();
-        let msg_type: Option<String> = match subscriber.recv_timeout(Duration::from_secs(2)) {
-            Ok(sample) => match String::try_from(sample.encoding.suffix()) {
-                Ok(v) => Some(v),
-                Err(_) => None,
-            },
-            Err(_) => {
-                warn!("Did not find schema");
-                None
-            }
-        };
-        cloned_msg_type_vec.push(msg_type);
-    }
-    assert!(args.topics.len() == cloned_msg_type_vec.len());
-    let mut futures = Vec::new();
-    for idx in 0..args.topics.len() {
+    for (idx, _item) in cloned_msg_type_vec
+        .iter()
+        .enumerate()
+        .take(args.topics.len())
+    {
         let topic = &args.topics[idx];
         let msg_type = &cloned_msg_type_vec[idx];
         match msg_type {
@@ -337,14 +359,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
                     futures.push(run_and_log_err(
                         topic,
-                        stream(
-                            channel_id,
-                            start_time,
-                            &args,
-                            tx.clone(),
-                            subscriber,
-                            &topic,
-                        ),
+                        stream(channel_id, start_time, &args, tx.clone(), subscriber, topic),
                     ));
                 }
             }

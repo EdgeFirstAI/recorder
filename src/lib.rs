@@ -159,49 +159,33 @@ pub fn decode_pointcloud2(points: &PointCloud2) -> Vec<Point> {
                 let offset = field.offset as usize;
                 match field.datatype {
                     FLOAT32 => {
-                        let fdata: f32;
-                        if points.is_bigendian {
-                            fdata =
-                                f32::from_be_bytes(data[offset..offset + 4].try_into().unwrap());
-                        } else {
-                            fdata =
-                                f32::from_le_bytes(data[offset..offset + 4].try_into().unwrap());
-                        }
-                        match field.name.as_str() {
-                            "x" => {
-                                point.x = fdata;
+                        if field.datatype == FLOAT32 {
+                            let fdata: f32 = if points.is_bigendian {
+                                f32::from_be_bytes(data[offset..offset + 4].try_into().unwrap())
+                            } else {
+                                f32::from_le_bytes(data[offset..offset + 4].try_into().unwrap())
+                            };
+                            match field.name.as_str() {
+                                "x" => point.x = fdata,
+                                "y" => point.y = fdata,
+                                "z" => point.z = fdata,
+                                "noise" => point.noise = fdata,
+                                "radial_speed" => point.radial_speed = fdata,
+                                "snr" => point.snr = fdata,
+                                "power" => point.power = fdata,
+                                "rcs" => point.rcs = fdata,
+                                _ => {}
                             }
-                            "y" => {
-                                point.y = fdata;
-                            }
-                            "z" => {
-                                point.z = fdata;
-                            }
-                            "noise" => {
-                                point.noise = fdata;
-                            }
-                            "radial_speed" => {
-                                point.radial_speed = fdata;
-                            }
-                            "snr" => {
-                                point.snr = fdata;
-                            }
-                            "power" => {
-                                point.power = fdata;
-                            }
-                            "rcs" => {
-                                point.rcs = fdata;
-                            }
-                            _ => {}
                         }
                     }
-                    _ => {}
+                    0_u8..=6_u8 | 8_u8..=u8::MAX => todo!(),
                 }
             }
+
             point_vec.push(point);
         }
     }
-    return point_vec;
+    point_vec
 }
 
 pub fn open_mcap<P: AsRef<Utf8Path>>(p: P) -> Result<Mmap> {
@@ -294,7 +278,7 @@ pub fn get_2d_obj_data(box_2d_data: Vec<Object>) -> Result<Vec<Boxes2d>> {
     let mut boxes_2d = Vec::new();
     const IMAGE_WIDTH: f32 = 1280.0;
     const IMAGE_HEIGHT: f32 = 720.0;
-    for (_index, object) in box_2d_data.iter().enumerate() {
+    for object in box_2d_data.iter() {
         if object.label == "Person" {
             let label = 1;
             let x = object.position[0];
@@ -329,7 +313,7 @@ pub fn get_2d_obj_data(box_2d_data: Vec<Object>) -> Result<Vec<Boxes2d>> {
 
 pub fn get_3d_obj_data(box_3d_data: Vec<Object>) -> Result<Vec<Boxes3d>> {
     let mut boxes_3d = Vec::new();
-    for (_index, object) in box_3d_data.iter().enumerate() {
+    for object in box_3d_data.iter() {
         if object.label == "Person" {
             let label = 1;
             let x = object.position[0];
