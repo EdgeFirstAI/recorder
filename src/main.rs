@@ -60,14 +60,14 @@ struct Args {
 
     /// connect to endpoint
     #[arg(short, long, default_value = "tcp/127.0.0.1:7447")]
-    endpoints: Vec<String>,
+    connect: Vec<String>,
 
     /// listen to endpoint
     #[arg(short, long)]
     listen: Vec<String>,
 
     /// duration for the recording in seconds
-    #[arg(short, long)]
+    #[arg(short, long, env)]
     duration: Option<u128>,
 
     /// topic detection timeout in seconds
@@ -75,6 +75,7 @@ struct Args {
     timeout: u64,
 
     /// topics
+    #[arg(env, required = true)]
     topics: Vec<String>,
 }
 
@@ -266,7 +267,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let mode = WhatAmI::from_str(&args.mode).unwrap();
     config.set_mode(Some(mode)).unwrap();
-    config.connect.endpoints = args.endpoints.iter().map(|v| v.parse().unwrap()).collect();
+    config.connect.endpoints = args.connect.iter().map(|v| v.parse().unwrap()).collect();
     config.listen.endpoints = args.listen.iter().map(|v| v.parse().unwrap()).collect();
     let _ = config.scouting.multicast.set_enabled(Some(false));
 
