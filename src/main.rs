@@ -53,6 +53,7 @@ const CAMERA_INFO_MSGS_KEY: &str = "sensor_msgs/msg/CameraInfo";
 pub const NANO_SEC: u128 = 1_000_000_000;
 
 #[derive(Parser, Debug)]
+#[command(author, version, about, long_about = None)]
 struct Args {
     /// zenoh connection mode
     #[arg(short, long, default_value = "client")]
@@ -71,7 +72,7 @@ struct Args {
     duration: Option<u128>,
 
     /// topic detection timeout in seconds
-    #[arg(short, long, default_value = "3")]
+    #[arg(short, long, default_value = "30")]
     timeout: u64,
 
     /// topics
@@ -136,7 +137,7 @@ async fn stream(
             debug!("Program stopped finishing writing MCAP.....");
             break;
         }
-        match subscriber_topic.recv_timeout(Duration::from_secs(5)) {
+        match subscriber_topic.recv_timeout(Duration::from_secs(10)) {
             Ok(sample) => {
                 let data = sample.value.payload.contiguous().to_vec();
                 let current_time = SystemTime::now();
@@ -164,7 +165,7 @@ async fn stream(
             }
             Err(_) => {
                 warn!("Lost {:?} topic", topic);
-                break;
+                continue;
             }
         }
     }
