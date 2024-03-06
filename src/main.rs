@@ -234,7 +234,7 @@ fn get_file_name() -> Result<String, Box<dyn std::error::Error>> {
         Ok(value) => {
             match fs::create_dir_all(&value) {
                 Ok(()) => {
-                    info!("Directory {} created successfully.", value);
+                    info!("Directory {} found successfully.", value);
                 }
                 Err(_) => {
                     error!("Failed to create directory {}", value);
