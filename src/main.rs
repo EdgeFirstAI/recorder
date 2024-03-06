@@ -3,7 +3,7 @@ use anyhow::Result;
 use chrono::Utc;
 use clap::Parser;
 use futures::Future;
-use log::{error, info, warn};
+use log::{debug, error, info, warn};
 use mcap::{records::MessageHeader, Channel, Schema, Writer};
 use std::{
     borrow::Cow,
@@ -75,14 +75,14 @@ struct Args {
     timeout: u64,
 
     /// topics
-    #[arg(env, required = true)]
+    #[arg(env, required = true, value_delimiter = ' ')]
     topics: Vec<String>,
 }
 
 async fn run_and_log_err(name: &str, future: impl Future<Output = Result<(), Box<dyn Error>>>) {
     match future.await {
         Ok(_) => {
-            log::info!("{name} has finished running");
+            log::debug!("{name} has finished running");
         }
         Err(e) => {
             log::error!("{name} exited with error: {e}");
@@ -133,7 +133,7 @@ async fn stream(
 
     loop {
         if !running.load(Ordering::SeqCst) {
-            info!("Program stopped finishing writing MCAP.....");
+            debug!("Program stopped finishing writing MCAP.....");
             break;
         }
         match subscriber_topic.recv_timeout(Duration::from_secs(5)) {
@@ -242,7 +242,7 @@ fn get_file_name() -> Result<String, Box<dyn std::error::Error>> {
             }
 
             result = value.to_string() + "/" + &result;
-            info!(
+            debug!(
                 "STORAGE environment variable is set storing MCAP in: {}",
                 value
             );
@@ -261,7 +261,7 @@ fn get_file_name() -> Result<String, Box<dyn std::error::Error>> {
 
 #[async_std::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let args = Args::parse();
+    let mut args = Args::parse();
     let byte_arrays = create_hash_map();
     let mut config = Config::default();
 
@@ -272,8 +272,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let _ = config.scouting.multicast.set_enabled(Some(false));
 
     let session = zenoh::open(config).res_async().await.unwrap();
+    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
 
-    env_logger::init();
+    for topic in &mut args.topics {
+        let mut fixed_topic = topic.to_string();
+        if !topic.starts_with("rt/") && !topic.starts_with('/') {
+            fixed_topic = format!("rt/{}", topic);
+        } else if topic.starts_with('/') {
+            fixed_topic = format!("rt{}", topic);
+        }
+        *topic = fixed_topic;
+    }
 
     let mut cloned_msg_type_vec = Vec::new();
     let (tx, rx) = mpsc::channel();
@@ -300,23 +309,41 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             match subscriber.recv_timeout(Duration::from_secs(args.timeout)) {
                 Ok(sample) => match String::from_str(sample.encoding.suffix()) {
                     Ok(v) => {
-                        info!("Received message type: {}", v);
+                        debug!("Received message type: {}", v);
                         Some(v)
                     }
                     Err(_) => None,
                 },
-                Err(_) => {
-                    warn!(
-                        "Timeout occurred while waiting for a message on topic {:?}",
-                        topic
-                    );
-                    None
-                }
+                Err(_) => None,
             };
         cloned_msg_type_vec.push(msg_type);
     }
 
-    info!("Subscribed to {:?} ", cloned_msg_type_vec);
+    for (idx, _item) in cloned_msg_type_vec
+        .iter()
+        .enumerate()
+        .take(args.topics.len())
+    {
+        let topic = &args.topics[idx];
+        let msg_type = &cloned_msg_type_vec[idx];
+        match msg_type {
+            Some(_) => {
+                info!(
+                    "Suscessfully subscribed to {:?} and started recording",
+                    topic
+                );
+            }
+            None => {
+                warn!(
+                    "Timeout occurred while waiting for a message on topic {:?}",
+                    topic
+                );
+                continue;
+            }
+        }
+    }
+
+    debug!("Subscribed to {:?} ", cloned_msg_type_vec);
     let is_msg_type_none = cloned_msg_type_vec.iter().all(|x| x.is_none());
     if is_msg_type_none {
         info!("Found no topic schema exiting");
