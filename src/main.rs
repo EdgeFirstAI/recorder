@@ -75,7 +75,7 @@ struct Args {
     timeout: u64,
 
     /// topics
-    #[arg(env, required = true)]
+    #[arg(env, required = true, value_delimiter = ' ')]
     topics: Vec<String>,
 }
 
@@ -273,17 +273,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let session = zenoh::open(config).res_async().await.unwrap();
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
-
-    let topics_env = match std::env::var("TOPICS") {
-        Ok(val) => val,
-        Err(_) => {
-            let args: Vec<String> = std::env::args().skip(1).collect();
-            args.join(" ")
-        }
-    };
-
-    let topics: Vec<&str> = topics_env.split(' ').collect();
-    args.topics = topics.iter().map(|&s| s.to_string()).collect();
 
     for topic in &mut args.topics {
         let mut fixed_topic = topic.to_string();
