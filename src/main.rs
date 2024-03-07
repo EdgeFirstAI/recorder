@@ -11,6 +11,7 @@ use std::{
     error::Error,
     fs,
     io::BufWriter,
+    path::Path,
     process::exit,
     str::FromStr,
     sync::{
@@ -53,6 +54,7 @@ const CAMERA_INFO_MSGS_KEY: &str = "sensor_msgs/msg/CameraInfo";
 pub const NANO_SEC: u128 = 1_000_000_000;
 
 #[derive(Parser, Debug)]
+#[command(author, version, about, long_about = None)]
 struct Args {
     /// zenoh connection mode
     #[arg(short, long, default_value = "client")]
@@ -71,7 +73,7 @@ struct Args {
     duration: Option<u128>,
 
     /// topic detection timeout in seconds
-    #[arg(short, long, default_value = "3")]
+    #[arg(short, long, default_value = "30")]
     timeout: u64,
 
     /// topics
@@ -98,10 +100,8 @@ async fn write_to_file(
     loop {
         match rx.recv() {
             Ok((header, data)) => match out.write_to_known_channel(&header, &data) {
-                Ok(_) => {}
-                Err(e) => {
-                    eprintln!("Error writing to channel: {:?}", e);
-                }
+                Ok(_) => (),
+                Err(e) => error!("Error writing to channel: {}", e),
             },
             Err(_) => {
                 out.finish()?;
@@ -136,7 +136,7 @@ async fn stream(
             debug!("Program stopped finishing writing MCAP.....");
             break;
         }
-        match subscriber_topic.recv_timeout(Duration::from_secs(5)) {
+        match subscriber_topic.recv_timeout(Duration::from_secs(10)) {
             Ok(sample) => {
                 let data = sample.value.payload.contiguous().to_vec();
                 let current_time = SystemTime::now();
@@ -163,8 +163,8 @@ async fn stream(
                 }
             }
             Err(_) => {
-                warn!("Lost {:?} topic", topic);
-                break;
+                warn!("Lost topic: {}", topic);
+                continue;
             }
         }
     }
@@ -210,51 +210,35 @@ fn create_hash_map() -> HashMap<&'static str, &'static [u8]> {
     byte_arrays
 }
 
-fn get_file_name() -> Result<String, Box<dyn std::error::Error>> {
-    let current_time = Utc::now();
-    let formatted_time = current_time.format("%Y_%m_%d_%H_%M_%S").to_string();
-    let mut result: String;
-    match hostname::get() {
-        Ok(hostname) => {
-            if let Some(name) = hostname.to_str() {
-                result = name.to_owned() + "_" + &formatted_time + ".mcap";
-            } else {
-                result = "maivin_mcap_".to_string() + &formatted_time + ".mcap";
-                warn!("Hostname is not valid UTF-8, using {:?}", result);
+fn get_storage() -> Result<String, std::io::Error> {
+    match std::env::var("STORAGE") {
+        // If the environment variable is not set, return only the filename.
+        Err(_) => Ok("".to_owned()),
+        Ok(storage) => {
+            debug!("STORAGE={}", storage);
+            match fs::create_dir_all(&storage) {
+                Ok(_) => Ok(storage),
+                Err(e) => {
+                    error!("Failed to create STORAGE {}: {}", storage, e);
+                    Err(e)
+                }
             }
-        }
-        Err(_e) => {
-            result = "maivin_mcap_".to_string() + &formatted_time + ".mcap";
-            info!("Failed to get hostname, using {:?}", result);
         }
     }
+}
 
-    match std::env::var("STORAGE") {
-        Ok(value) => {
-            match fs::create_dir_all(&value) {
-                Ok(()) => {
-                    info!("Directory {} created successfully.", value);
-                }
-                Err(_) => {
-                    error!("Failed to create directory {}", value);
-                    exit(-1);
-                }
-            }
-
-            result = value.to_string() + "/" + &result;
-            debug!(
-                "STORAGE environment variable is set storing MCAP in: {}",
-                value
-            );
-            Ok(result)
-        }
-        Err(_) => {
-            let path = std::env::current_dir()?;
-            info!(
-                "STORAGE environment variable is not set, storing the MCAP in: {:?}",
-                path
-            );
-            Ok(result)
+fn get_filename() -> String {
+    let current_time = Utc::now();
+    let formatted_time = current_time.format("%Y_%m_%d_%H_%M_%S").to_string();
+    match hostname::get() {
+        // If hostname fails for whatever reason then use maivin-recorder as the prefix.
+        Ok(hostname) => match hostname.to_str() {
+            Some(hostname) => format!("{}_{}.mcap", hostname, formatted_time),
+            None => format!("maivin-recorder_{}.mcap", formatted_time),
+        },
+        Err(e) => {
+            warn!("Failed to get hostname: {}", e);
+            format!("maivin-recorder_{}.mcap", formatted_time)
         }
     }
 }
@@ -329,13 +313,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         match msg_type {
             Some(_) => {
                 info!(
-                    "Suscessfully subscribed to {:?} and started recording",
+                    "Suscessfully subscribed to {} and started recording",
                     topic
                 );
             }
             None => {
                 warn!(
-                    "Timeout occurred while waiting for a message on topic {:?}",
+                    "Timeout occurred while waiting for a message on topic {}",
                     topic
                 );
                 continue;
@@ -352,18 +336,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     assert!(args.topics.len() == cloned_msg_type_vec.len());
     let mut futures = Vec::new();
 
-    let mut out: Writer<'_, BufWriter<fs::File>>;
-    let file_name;
-    match get_file_name() {
-        Ok(r) => {
-            file_name = r.clone();
-            out = Writer::new(BufWriter::new(fs::File::create(r)?))?;
-        }
-        Err(_) => {
-            error!("File name invalid");
-            exit(-1);
-        }
-    };
+    let filename = Path::new(&get_storage()?).join(get_filename());
+    info!("Recording to {}", filename.display());
+    let mut out = Writer::new(BufWriter::new(fs::File::create(&filename)?))?;
+
     let current_time = SystemTime::now();
     let duration = current_time
         .duration_since(UNIX_EPOCH)
@@ -404,6 +380,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
         s.spawn(write_future);
     });
-    info!("Saved MCAP at {:?}", file_name);
+    info!("Saved MCAP to {}", filename.display());
     Ok(())
 }
