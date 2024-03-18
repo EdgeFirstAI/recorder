@@ -83,7 +83,7 @@ struct Args {
     #[arg(env, required = false, value_delimiter = ' ')]
     topics: Vec<String>,
 
-    /// all topics
+    /// will look for all topics and start recording after 'timeout' parameter
     #[arg(short, long)]
     all_topics: bool,
 }
