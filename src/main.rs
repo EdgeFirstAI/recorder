@@ -7,7 +7,7 @@ use log::{debug, error, info, warn};
 use mcap::{records::MessageHeader, Channel, Schema, Writer};
 use std::{
     borrow::Cow,
-    collections::{BTreeMap, HashMap},
+    collections::{BTreeMap, HashMap, HashSet},
     error::Error,
     fs,
     io::BufWriter,
@@ -19,7 +19,7 @@ use std::{
         mpsc::{self, Receiver, Sender},
         Arc,
     },
-    time::{SystemTime, UNIX_EPOCH},
+    time::{Instant, SystemTime, UNIX_EPOCH},
 };
 use tokio::{
     signal::unix::{signal, SignalKind},
@@ -31,6 +31,7 @@ use zenoh::{
     prelude::r#async::AsyncResolve,
     sample::Sample,
     subscriber::Subscriber,
+    Session,
 };
 
 pub const FOXGLOVE_MSGS_COMPRESSED_VIDEO: &[u8] =
@@ -79,8 +80,12 @@ struct Args {
     timeout: u64,
 
     /// topics
-    #[arg(env, required = true, value_delimiter = ' ')]
+    #[arg(env, required = false, value_delimiter = ' ')]
     topics: Vec<String>,
+
+    /// all topics
+    #[arg(short, long)]
+    all_topics: bool,
 }
 
 async fn run_and_log_err(name: &str, future: impl Future<Output = Result<(), Box<dyn Error>>>) {
@@ -246,6 +251,51 @@ fn get_filename() -> String {
     }
 }
 
+async fn get_all_topics(args: &Args, session: &Session) -> Vec<String> {
+    let wildcard_topic = "*/**";
+    let subscriber = match timeout(
+        Duration::from_secs(args.timeout),
+        session.declare_subscriber(wildcard_topic).res(),
+    )
+    .await
+    {
+        Ok(result) => match result {
+            Ok(subscriber) => subscriber,
+            Err(err) => {
+                panic!("Error declaring subscriber: {:?}", err);
+            }
+        },
+        Err(_) => {
+            panic!("Timeout occurred while waiting for subscriber declaration.");
+        }
+    };
+
+    let mut topic_names = Vec::new();
+    let mut unique_topics = HashSet::new();
+
+    let start_time = Instant::now();
+    while start_time.elapsed() < Duration::from_secs(args.timeout) {
+        match subscriber.recv_timeout(Duration::from_secs(args.timeout)) {
+            Ok(topic) => {
+                if unique_topics.insert(topic.key_expr.to_string()) {
+                    topic_names.push(topic.key_expr.to_string().clone());
+                    info!(
+                        "Found {:?} will start recording in {:?} seconds",
+                        topic.key_expr.to_string().clone(),
+                        (Duration::from_secs(args.timeout) - start_time.elapsed()).as_secs() as i64
+                    );
+                }
+            }
+            Err(err) => {
+                error!("Error receiving message: {:?}", err);
+                break;
+            }
+        }
+    }
+    drop(subscriber);
+    return topic_names;
+}
+
 #[async_std::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut args = Args::parse();
@@ -259,7 +309,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let _ = config.scouting.multicast.set_enabled(Some(false));
 
     let session = zenoh::open(config).res_async().await.unwrap();
+
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
+    if args.topics.len() == 0 && !args.all_topics {
+        info!("No topics are specified and --all-topics flag is FALSE exiting");
+        exit(-1)
+    }
+
+    if args.all_topics {
+        let topic_list: Vec<String> = get_all_topics(&args, &session).await;
+        args.topics = topic_list
+    }
 
     for topic in &mut args.topics {
         let mut fixed_topic = topic.to_string();
@@ -314,8 +374,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         let topic = &args.topics[idx];
         let msg_type = &cloned_msg_type_vec[idx];
         match msg_type {
-            Some(_) => {
-                info!("Successful subscribed to {} and started recording", topic);
+            Some(s) => {
+                if s != "" {
+                    info!("Successful subscribed to {} and started recording", topic);
+                }
             }
             None => {
                 warn!(
@@ -328,11 +390,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     debug!("Subscribed to {:?} ", cloned_msg_type_vec);
-    let is_msg_type_none = cloned_msg_type_vec.iter().all(|x| x.is_none());
-    if is_msg_type_none {
-        info!("Found no topic schema exiting");
+    let should_exit = cloned_msg_type_vec
+        .iter()
+        .all(|x| matches!(x, Some(s) if s.is_empty()) || x.is_none());
+
+    if should_exit {
+        info!("Found no suitable schema for any of the topics exiting");
         exit(-1);
     }
+
     assert!(args.topics.len() == cloned_msg_type_vec.len());
     let mut futures = Vec::new();
 
