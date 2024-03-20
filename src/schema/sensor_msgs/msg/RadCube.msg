@@ -14,10 +14,6 @@ uint8 RXCHANNEL = 4
 uint8 SEQUENCE = 5
 
 std_msgs/Header header
-        builtin_interfaces/Time stamp
-                int32 sec
-                uint32 nanosec
-        string frame_id
 
 uint8[] layout      # Radar cube layout provides labels for each dimensions
 uint16[] shape      # Radar cube shape provides the shape of each dimensions

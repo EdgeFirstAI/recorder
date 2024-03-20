@@ -190,8 +190,10 @@ fn get_channel<'a>(
         data: Cow::Owned(image_schema_data),
     };
     let image_schema_arc = Arc::new(image_schema);
+    let modified_topic = message_topic.replace("rt", "");
+    debug!("{:?}", modified_topic);
     let image_channel: Channel<'a> = Channel {
-        topic: message_topic.to_string(),
+        topic: modified_topic.to_string(),
         schema: Some(Arc::clone(&image_schema_arc)),
         message_encoding: String::from("cdr"),
         metadata: BTreeMap::default(),
