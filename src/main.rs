@@ -7,7 +7,7 @@ use log::{debug, error, info, warn};
 use mcap::{records::MessageHeader, Channel, Schema, Writer};
 use std::{
     borrow::Cow,
-    collections::{BTreeMap, HashMap},
+    collections::{BTreeMap, HashMap, HashSet},
     error::Error,
     fs,
     io::BufWriter,
@@ -19,7 +19,7 @@ use std::{
         mpsc::{self, Receiver, Sender},
         Arc,
     },
-    time::{SystemTime, UNIX_EPOCH},
+    time::{Instant, SystemTime, UNIX_EPOCH},
 };
 use tokio::{
     signal::unix::{signal, SignalKind},
@@ -31,6 +31,7 @@ use zenoh::{
     prelude::r#async::AsyncResolve,
     sample::Sample,
     subscriber::Subscriber,
+    Session,
 };
 
 pub const FOXGLOVE_MSGS_COMPRESSED_VIDEO: &[u8] =
@@ -42,6 +43,7 @@ pub const IMU_MSGS: &[u8] = include_bytes!("schema/sensor_msgs/msg/Imu.msg");
 pub const GPS_MSGS: &[u8] = include_bytes!("schema/sensor_msgs/msg/Gps.msg");
 pub const BOXES_MSGS: &[u8] = include_bytes!("schema/foxglove_msgs/msg/ImageAnnotation.msg");
 pub const CAMERA_INFO_MSGS: &[u8] = include_bytes!("schema/sensor_msgs/msg/CameraInfo.msg");
+pub const RAD_CUBE_INFO_MSGS: &[u8] = include_bytes!("schema/sensor_msgs/msg/RadCube.msg");
 
 const FOXGLOVE_MSGS_COMPRESSED_VIDEO_KEY: &str = "foxglove_msgs/msg/CompressedVideo";
 const FOXGLOVE_MSGS_COMPRESSED_IMAGE_KEY: &str = "sensor_msgs/msg/CompressedImage";
@@ -50,6 +52,7 @@ const IMU_MSGS_KEY: &str = "sensor_msgs/msg/Imu";
 const GPS_MSGS_KEY: &str = "sensor_msgs/msg/NavSatFix";
 const BOXES_MSGS_KEY: &str = "foxglove_msgs/msg/ImageAnnotations";
 const CAMERA_INFO_MSGS_KEY: &str = "sensor_msgs/msg/CameraInfo";
+const RAD_CUBE_INFO_MSGS_KEY: &str = "sensor_msgs/msg/RadCube";
 
 pub const NANO_SEC: u128 = 1_000_000_000;
 
@@ -77,8 +80,12 @@ struct Args {
     timeout: u64,
 
     /// topics
-    #[arg(env, required = true, value_delimiter = ' ')]
+    #[arg(env, required = false, value_delimiter = ' ')]
     topics: Vec<String>,
+
+    /// will look for all topics and start recording after 'timeout' parameter
+    #[arg(short, long)]
+    all_topics: bool,
 }
 
 async fn run_and_log_err(name: &str, future: impl Future<Output = Result<(), Box<dyn Error>>>) {
@@ -183,8 +190,10 @@ fn get_channel<'a>(
         data: Cow::Owned(image_schema_data),
     };
     let image_schema_arc = Arc::new(image_schema);
+    let modified_topic = message_topic.replace("rt", "");
+    debug!("{:?}", modified_topic);
     let image_channel: Channel<'a> = Channel {
-        topic: message_topic.to_string(),
+        topic: modified_topic.to_string(),
         schema: Some(Arc::clone(&image_schema_arc)),
         message_encoding: String::from("cdr"),
         metadata: BTreeMap::default(),
@@ -207,6 +216,7 @@ fn create_hash_map() -> HashMap<&'static str, &'static [u8]> {
     byte_arrays.insert(GPS_MSGS_KEY, GPS_MSGS);
     byte_arrays.insert(BOXES_MSGS_KEY, BOXES_MSGS);
     byte_arrays.insert(CAMERA_INFO_MSGS_KEY, CAMERA_INFO_MSGS);
+    byte_arrays.insert(RAD_CUBE_INFO_MSGS_KEY, RAD_CUBE_INFO_MSGS);
     byte_arrays
 }
 
@@ -243,6 +253,51 @@ fn get_filename() -> String {
     }
 }
 
+async fn get_all_topics(args: &Args, session: &Session) -> Vec<String> {
+    let wildcard_topic = "*/**";
+    let subscriber = match timeout(
+        Duration::from_secs(args.timeout),
+        session.declare_subscriber(wildcard_topic).res(),
+    )
+    .await
+    {
+        Ok(result) => match result {
+            Ok(subscriber) => subscriber,
+            Err(err) => {
+                panic!("Error declaring subscriber: {:?}", err);
+            }
+        },
+        Err(_) => {
+            panic!("Timeout occurred while waiting for subscriber declaration.");
+        }
+    };
+
+    let mut topic_names = Vec::new();
+    let mut unique_topics = HashSet::new();
+
+    let start_time = Instant::now();
+    while start_time.elapsed() < Duration::from_secs(args.timeout) {
+        match subscriber.recv_timeout(Duration::from_secs(args.timeout)) {
+            Ok(topic) => {
+                if unique_topics.insert(topic.key_expr.to_string()) {
+                    topic_names.push(topic.key_expr.to_string().clone());
+                    info!(
+                        "Found {:?} will start recording in {:?} seconds",
+                        topic.key_expr.to_string().clone(),
+                        (Duration::from_secs(args.timeout) - start_time.elapsed()).as_secs() as i64
+                    );
+                }
+            }
+            Err(err) => {
+                error!("Error receiving message: {:?}", err);
+                break;
+            }
+        }
+    }
+    drop(subscriber);
+    return topic_names;
+}
+
 #[async_std::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut args = Args::parse();
@@ -256,7 +311,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let _ = config.scouting.multicast.set_enabled(Some(false));
 
     let session = zenoh::open(config).res_async().await.unwrap();
+
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
+    if args.topics.len() == 0 && !args.all_topics {
+        info!("No topics are specified and --all-topics flag is FALSE exiting");
+        exit(-1)
+    }
+
+    if args.all_topics {
+        let topic_list: Vec<String> = get_all_topics(&args, &session).await;
+        args.topics = topic_list
+    }
 
     for topic in &mut args.topics {
         let mut fixed_topic = topic.to_string();
@@ -311,11 +376,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         let topic = &args.topics[idx];
         let msg_type = &cloned_msg_type_vec[idx];
         match msg_type {
-            Some(_) => {
-                info!(
-                    "Suscessfully subscribed to {} and started recording",
-                    topic
-                );
+            Some(s) => {
+                if s != "" {
+                    info!("Successful subscribed to {} and started recording", topic);
+                }
             }
             None => {
                 warn!(
@@ -328,11 +392,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     debug!("Subscribed to {:?} ", cloned_msg_type_vec);
-    let is_msg_type_none = cloned_msg_type_vec.iter().all(|x| x.is_none());
-    if is_msg_type_none {
-        info!("Found no topic schema exiting");
+    let should_exit = cloned_msg_type_vec
+        .iter()
+        .all(|x| matches!(x, Some(s) if s.is_empty()) || x.is_none());
+
+    if should_exit {
+        info!("Found no suitable schema for any of the topics exiting");
         exit(-1);
     }
+
     assert!(args.topics.len() == cloned_msg_type_vec.len());
     let mut futures = Vec::new();
 
