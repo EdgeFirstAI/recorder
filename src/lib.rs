@@ -14,8 +14,8 @@ use std::{
     result::Result::Ok,
 };
 use zenoh_ros_type::{
-    foxglove_msgs::FoxgloveCompressedVideo,
-    sensor_msgs::{point_field::FLOAT32, Image, NavSatFix, PointCloud2, RadCube, IMU},
+    foxglove_msgs::{FoxgloveCompressedVideo, FoxgloveImageAnnotations},
+    sensor_msgs::{point_field::FLOAT32, CameraInfo, Image, NavSatFix, PointCloud2, RadCube, IMU},
     std_msgs::Header,
 };
 
@@ -363,6 +363,12 @@ pub fn get_raw_zed_image_data(message: mcap::Message<'_>) -> Result<Image, Error
     Ok(image_data)
 }
 
+pub fn get_raw_bbox_data(message: &mcap::Message<'_>) -> Result<FoxgloveImageAnnotations, Error> {
+    let deserialized_message: FoxgloveImageAnnotations =
+        cdr::deserialize(&message.data).expect("Failed to deserialize message");
+    Ok(deserialized_message)
+}
+
 pub fn get_raw_cube_data(message: mcap::Message<'_>) -> Result<RadCube, Error> {
     let cube_data: RadCube =
         cdr::deserialize(&message.data).expect("Failed to deserialize message");
@@ -377,4 +383,8 @@ pub fn get_cube_data(cube_data: RadCube) -> Result<RadarCube> {
         cube: cube_data.cube,
         is_complex: cube_data.is_complex,
     })
+}
+
+pub fn get_camera_info(message: &mcap::Message<'_>) -> Result<CameraInfo, cdr::Error> {
+    cdr::deserialize(&message.data)
 }
