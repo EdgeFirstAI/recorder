@@ -283,11 +283,11 @@ pub fn get_raw_obj_data(message: &mcap::Message<'_>) -> Result<ObjectsStamped, E
     Ok(deserialized_message)
 }
 
-pub fn get_2d_obj_data(box_2d_data: Vec<Object>) -> Result<Vec<Boxes2d>> {
-    let mut boxes_2d = Vec::new();
+pub fn get_2d_obj_data(box_2d_data: &[Object]) -> Result<Vec<Boxes2d>> {
+    let mut boxes_2d = Vec::with_capacity(box_2d_data.len());
     const IMAGE_WIDTH: f32 = 1280.0;
     const IMAGE_HEIGHT: f32 = 720.0;
-    for object in box_2d_data.iter() {
+    for object in box_2d_data {
         if object.label == "Person" {
             let label = 1;
             let x = object.position[0];
@@ -320,9 +320,9 @@ pub fn get_2d_obj_data(box_2d_data: Vec<Object>) -> Result<Vec<Boxes2d>> {
     Ok(boxes_2d)
 }
 
-pub fn get_3d_obj_data(box_3d_data: Vec<Object>) -> Result<Vec<Boxes3d>> {
-    let mut boxes_3d = Vec::new();
-    for object in box_3d_data.iter() {
+pub fn get_3d_obj_data(box_3d_data: &[Object]) -> Result<Vec<Boxes3d>> {
+    let mut boxes_3d = Vec::with_capacity(box_3d_data.len());
+    for object in box_3d_data {
         if object.label == "Person" {
             let label = 1;
             let x = object.position[0];
