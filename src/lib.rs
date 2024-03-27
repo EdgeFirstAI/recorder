@@ -208,18 +208,18 @@ pub fn calculate_center(x_min: &u32, y_min: &u32, x_max: &u32, y_max: &u32) -> (
     (center_x, center_y)
 }
 
-pub fn get_radar_data(points: PointCloud2) -> Result<Vec<Point>, Error> {
+pub fn get_radar_data(points: &PointCloud2) -> Result<Vec<Point>, Error> {
     let radar_data = decode_pointcloud2(&points);
     Ok(radar_data)
 }
 
-pub fn get_raw_radar_data(message: mcap::Message<'_>) -> Result<PointCloud2, Error> {
+pub fn get_raw_radar_data(message: &mcap::Message<'_>) -> Result<PointCloud2, Error> {
     let points: PointCloud2 =
         cdr::deserialize(&message.data).expect("Failed to deserialize message");
     Ok(points)
 }
 
-pub fn get_raw_imu_data(message: mcap::Message<'_>) -> Result<IMU, Error> {
+pub fn get_raw_imu_data(message: &mcap::Message<'_>) -> Result<IMU, Error> {
     let imu_data: IMU = cdr::deserialize(&message.data).expect("Failed to deserialize message");
     Ok(imu_data)
 }
@@ -259,13 +259,13 @@ pub fn get_imu_data(imu_data: IMU) -> Result<Imu> {
     })
 }
 
-pub fn get_raw_gps_data(message: mcap::Message<'_>) -> Result<NavSatFix, Error> {
+pub fn get_raw_gps_data(message: &mcap::Message<'_>) -> Result<NavSatFix, Error> {
     let gps_data: NavSatFix =
         cdr::deserialize(&message.data).expect("Failed to deserialize message");
     Ok(gps_data)
 }
 
-pub fn get_gps_data(gps_data: NavSatFix) -> Result<Gps> {
+pub fn get_gps_data(gps_data: &NavSatFix) -> Result<Gps> {
     let latitude = gps_data.latitude;
     let longitude = gps_data.longitude;
     let altitude = gps_data.altitude;
@@ -277,7 +277,7 @@ pub fn get_gps_data(gps_data: NavSatFix) -> Result<Gps> {
     })
 }
 
-pub fn get_raw_obj_data(message: mcap::Message<'_>) -> Result<ObjectsStamped, Error> {
+pub fn get_raw_obj_data(message: &mcap::Message<'_>) -> Result<ObjectsStamped, Error> {
     let deserialized_message: ObjectsStamped =
         cdr::deserialize(&message.data).expect("Failed to deserialize message");
     Ok(deserialized_message)
@@ -349,7 +349,7 @@ pub fn get_3d_obj_data(box_3d_data: Vec<Object>) -> Result<Vec<Boxes3d>> {
     Ok(boxes_3d)
 }
 
-pub fn get_raw_image_data(message: mcap::Message<'_>) -> Result<FoxgloveCompressedVideo, Error> {
+pub fn get_raw_image_data(message: &mcap::Message<'_>) -> Result<FoxgloveCompressedVideo, Error> {
     let image_data: FoxgloveCompressedVideo =
         cdr::deserialize(&message.data).expect("Failed to deserialize message");
     if image_data.format == "h264" {
@@ -358,7 +358,7 @@ pub fn get_raw_image_data(message: mcap::Message<'_>) -> Result<FoxgloveCompress
     Err(Error::new(ErrorKind::Other, "Video processing failed"))
 }
 
-pub fn get_raw_zed_image_data(message: mcap::Message<'_>) -> Result<Image, Error> {
+pub fn get_raw_zed_image_data(message: &mcap::Message<'_>) -> Result<Image, Error> {
     let image_data: Image = cdr::deserialize(&message.data).expect("Failed to deserialize message");
     Ok(image_data)
 }
@@ -369,7 +369,7 @@ pub fn get_raw_bbox_data(message: &mcap::Message<'_>) -> Result<FoxgloveImageAnn
     Ok(deserialized_message)
 }
 
-pub fn get_raw_cube_data(message: mcap::Message<'_>) -> Result<RadCube, Error> {
+pub fn get_raw_cube_data(message: &mcap::Message<'_>) -> Result<RadCube, Error> {
     let cube_data: RadCube =
         cdr::deserialize(&message.data).expect("Failed to deserialize message");
     Ok(cube_data)
