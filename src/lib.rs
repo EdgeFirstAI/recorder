@@ -19,7 +19,7 @@ use zenoh_ros_type::{
     std_msgs::Header,
 };
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct Point {
     pub x: f32,
     pub y: f32,
@@ -30,7 +30,7 @@ pub struct Point {
     pub power: f32,
     pub rcs: f32,
 }
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct Imu {
     pub roll: f64,
     pub pitch: f64,
@@ -42,13 +42,13 @@ pub struct Imu {
     pub acceleration_y: f64,
     pub acceleration_z: f64,
 }
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct Gps {
     pub latitude: f64,
     pub longitude: f64,
     pub altitude: f64,
 }
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct Boxes3d {
     pub label: i32,
     pub x: f32,
@@ -58,7 +58,7 @@ pub struct Boxes3d {
     pub h: f32,
     pub l: f32,
 }
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct Boxes2d {
     pub label: i32,
     pub x: f32,
@@ -67,7 +67,7 @@ pub struct Boxes2d {
     pub w: f32,
     pub h: f32,
 }
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct Object {
     pub label: String,
     pub label_id: i16,
@@ -90,55 +90,55 @@ pub struct Object {
     pub skeleton_2d: Skeleton2D,
     pub skeleton_3d: Skeleton3D,
 }
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct BoundingBox2Df {
     pub corners: [Keypoint2Df; 4],
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct BoundingBox2Di {
     pub corners: [Keypoint2Di; 4],
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct BoundingBox3D {
     pub corners: [Keypoint3D; 8],
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct Keypoint2Df {
     pub kp: [f32; 2],
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct Keypoint2Di {
     pub kp: [u32; 2],
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct Keypoint3D {
     pub kp: [f32; 3],
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct Skeleton2D {
     #[serde(with = "BigArray")]
     pub kp: [Keypoint2Df; 70],
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct Skeleton3D {
     #[serde(with = "BigArray")]
     pub kp: [Keypoint3D; 70],
 }
 
-#[derive(Deserialize, Serialize)]
+#[derive(Clone, Deserialize, Serialize)]
 pub struct ObjectsStamped {
     pub header: Header,
     pub objects: Vec<Object>,
 }
 
-#[derive(Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct RadarCube {
     pub layout: Vec<u8>,
     pub shape: Vec<u16>,
