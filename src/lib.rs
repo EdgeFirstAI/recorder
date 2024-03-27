@@ -15,7 +15,7 @@ use std::{
 };
 use zenoh_ros_type::{
     foxglove_msgs::FoxgloveCompressedVideo,
-    sensor_msgs::{point_field::FLOAT32, Image, NavSatFix, PointCloud2, IMU},
+    sensor_msgs::{point_field::FLOAT32, Image, NavSatFix, PointCloud2, RadCube, IMU},
     std_msgs::Header,
 };
 
@@ -136,6 +136,15 @@ pub struct Skeleton3D {
 pub struct ObjectsStamped {
     pub header: Header,
     pub objects: Vec<Object>,
+}
+
+#[derive(Deserialize, Serialize)]
+pub struct RadarCube {
+    pub layout: Vec<u8>,
+    pub shape: Vec<u16>,
+    pub scales: Vec<f32>,
+    pub cube: Vec<i16>,
+    pub is_complex: bool,
 }
 
 pub fn decode_pointcloud2(points: &PointCloud2) -> Vec<Point> {
@@ -352,4 +361,20 @@ pub fn get_raw_image_data(message: mcap::Message<'_>) -> Result<FoxgloveCompress
 pub fn get_raw_zed_image_data(message: mcap::Message<'_>) -> Result<Image, Error> {
     let image_data: Image = cdr::deserialize(&message.data).expect("Failed to deserialize message");
     Ok(image_data)
+}
+
+pub fn get_raw_cube_data(message: mcap::Message<'_>) -> Result<RadCube, Error> {
+    let cube_data: RadCube =
+        cdr::deserialize(&message.data).expect("Failed to deserialize message");
+    Ok(cube_data)
+}
+
+pub fn get_cube_data(cube_data: RadCube) -> Result<RadarCube> {
+    Ok(RadarCube {
+        layout: cube_data.layout,
+        shape: cube_data.shape,
+        scales: cube_data.scales,
+        cube: cube_data.cube,
+        is_complex: cube_data.is_complex,
+    })
 }

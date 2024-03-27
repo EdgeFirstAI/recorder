@@ -3592,7 +3592,7 @@ dependencies = [
 [[package]]
 name = "zenoh-ros-type"
 version = "0.3.3"
-source = "git+https://github.com/MaivinAI/zenoh-ros-type#dccfc85e0284d3f1663d960bdb686c867895d51c"
+source = "git+https://github.com/MaivinAI/zenoh-ros-type?branch=radarCube#14c74c3d80538d4f4f87640b27c67eb3213c916c"
 dependencies = [
  "serde",
  "serde_derive",
