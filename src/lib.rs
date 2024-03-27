@@ -148,7 +148,7 @@ pub struct RadarCube {
 }
 
 pub fn decode_pointcloud2(points: &PointCloud2) -> Vec<Point> {
-    let mut point_vec = Vec::new();
+    let mut point_vec = Vec::with_capacity(points.height as usize * points.width as usize);
     for i in 0..points.height as usize {
         for j in 0..points.width as usize {
             let start_idx = i * points.row_step as usize + j * points.point_step as usize;
