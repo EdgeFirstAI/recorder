@@ -224,7 +224,7 @@ pub fn get_raw_imu_data(message: &mcap::Message<'_>) -> Result<IMU, Error> {
     Ok(imu_data)
 }
 
-pub fn get_imu_data(imu_data: IMU) -> Result<Imu> {
+pub fn get_imu_data(imu_data: &IMU) -> Result<Imu> {
     let x = imu_data.orientation.x;
     let y = imu_data.orientation.y;
     let z = imu_data.orientation.z;
