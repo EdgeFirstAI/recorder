@@ -41,6 +41,7 @@ pub const GPS_MSGS: &[u8] = include_bytes!("schema/sensor_msgs/msg/Gps.msg");
 pub const BOXES_MSGS: &[u8] = include_bytes!("schema/foxglove_msgs/msg/ImageAnnotation.msg");
 pub const CAMERA_INFO_MSGS: &[u8] = include_bytes!("schema/sensor_msgs/msg/CameraInfo.msg");
 pub const RAD_CUBE_INFO_MSGS: &[u8] = include_bytes!("schema/sensor_msgs/msg/RadCube.msg");
+pub const CAR_INFO_MSGS: &[u8] = include_bytes!("schema/sensor_msgs/msg/Marker.msg");
 
 const FOXGLOVE_MSGS_COMPRESSED_VIDEO_KEY: &str = "foxglove_msgs/msg/CompressedVideo";
 const FOXGLOVE_MSGS_COMPRESSED_IMAGE_KEY: &str = "sensor_msgs/msg/CompressedImage";
@@ -50,6 +51,7 @@ const GPS_MSGS_KEY: &str = "sensor_msgs/msg/NavSatFix";
 const BOXES_MSGS_KEY: &str = "foxglove_msgs/msg/ImageAnnotations";
 const CAMERA_INFO_MSGS_KEY: &str = "sensor_msgs/msg/CameraInfo";
 const RAD_CUBE_INFO_MSGS_KEY: &str = "sensor_msgs/msg/RadCube";
+const CAR_INFO_MSGS_KEY: &str = "sensor_msgs/msg/Marker";
 
 pub const NANO_SEC: u128 = 1_000_000_000;
 
@@ -213,6 +215,7 @@ fn create_hash_map() -> HashMap<&'static str, &'static [u8]> {
     byte_arrays.insert(BOXES_MSGS_KEY, BOXES_MSGS);
     byte_arrays.insert(CAMERA_INFO_MSGS_KEY, CAMERA_INFO_MSGS);
     byte_arrays.insert(RAD_CUBE_INFO_MSGS_KEY, RAD_CUBE_INFO_MSGS);
+    byte_arrays.insert(CAR_INFO_MSGS_KEY, CAR_INFO_MSGS);
     byte_arrays
 }
 
