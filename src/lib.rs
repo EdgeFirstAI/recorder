@@ -370,7 +370,7 @@ pub fn get_raw_bbox_data(message: &mcap::Message<'_>) -> Result<FoxgloveImageAnn
     Ok(deserialized_message)
 }
 
-pub fn get_raw_cube_data(message: mcap::Message<'_>) -> Result<RadarCube, Error> {
+pub fn get_raw_cube_data(message: &mcap::Message<'_>) -> Result<RadarCube, Error> {
     let cube_data: RadarCube =
         cdr::deserialize(&message.data).expect("Failed to deserialize message");
     Ok(cube_data)
