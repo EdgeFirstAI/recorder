@@ -14,8 +14,9 @@ use std::{
     result::Result::Ok,
 };
 use zenoh_ros_type::{
+    edgefirst_msgs::RadarCube,
     foxglove_msgs::{FoxgloveCompressedVideo, FoxgloveImageAnnotations},
-    sensor_msgs::{point_field::FLOAT32, CameraInfo, Image, NavSatFix, PointCloud2, RadCube, IMU},
+    sensor_msgs::{point_field::FLOAT32, CameraInfo, Image, NavSatFix, PointCloud2, IMU},
     std_msgs::Header,
 };
 
@@ -139,7 +140,7 @@ pub struct ObjectsStamped {
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
-pub struct RadarCube {
+pub struct Cube {
     pub layout: Vec<u8>,
     pub shape: Vec<u16>,
     pub scales: Vec<f32>,
@@ -369,14 +370,14 @@ pub fn get_raw_bbox_data(message: &mcap::Message<'_>) -> Result<FoxgloveImageAnn
     Ok(deserialized_message)
 }
 
-pub fn get_raw_cube_data(message: &mcap::Message<'_>) -> Result<RadCube, Error> {
-    let cube_data: RadCube =
+pub fn get_raw_cube_data(message: mcap::Message<'_>) -> Result<RadarCube, Error> {
+    let cube_data: RadarCube =
         cdr::deserialize(&message.data).expect("Failed to deserialize message");
     Ok(cube_data)
 }
 
-pub fn get_cube_data(cube_data: RadCube) -> Result<RadarCube> {
-    Ok(RadarCube {
+pub fn get_cube_data(cube_data: RadarCube) -> Result<Cube> {
+    Ok(Cube {
         layout: cube_data.layout,
         shape: cube_data.shape,
         scales: cube_data.scales,

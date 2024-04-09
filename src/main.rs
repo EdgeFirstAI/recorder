@@ -1,5 +1,6 @@
 extern crate hostname;
 use anyhow::Result;
+use bus::{Bus, BusReader};
 use chrono::Utc;
 use clap::Parser;
 use futures::Future;
@@ -15,20 +16,16 @@ use std::{
     process::exit,
     str::FromStr,
     sync::{
-        atomic::{AtomicBool, Ordering},
-        mpsc::{self, Receiver, Sender},
+        mpsc::{self, Receiver, Sender, TryRecvError},
         Arc,
     },
     time::{Instant, SystemTime, UNIX_EPOCH},
 };
-use tokio::{
-    signal::unix::{signal, SignalKind},
-    time::{timeout, Duration},
-};
+use tokio::time::{timeout, Duration};
 use zenoh::{
     buffers::SplitBuffer,
     config::{Config, WhatAmI},
-    prelude::r#async::AsyncResolve,
+    prelude::{r#async::AsyncResolve, sync::SyncResolve},
     sample::Sample,
     subscriber::Subscriber,
     Session,
@@ -44,6 +41,7 @@ pub const GPS_MSGS: &[u8] = include_bytes!("schema/sensor_msgs/msg/Gps.msg");
 pub const BOXES_MSGS: &[u8] = include_bytes!("schema/foxglove_msgs/msg/ImageAnnotation.msg");
 pub const CAMERA_INFO_MSGS: &[u8] = include_bytes!("schema/sensor_msgs/msg/CameraInfo.msg");
 pub const RAD_CUBE_INFO_MSGS: &[u8] = include_bytes!("schema/sensor_msgs/msg/RadCube.msg");
+pub const CAR_INFO_MSGS: &[u8] = include_bytes!("schema/sensor_msgs/msg/Marker.msg");
 
 const FOXGLOVE_MSGS_COMPRESSED_VIDEO_KEY: &str = "foxglove_msgs/msg/CompressedVideo";
 const FOXGLOVE_MSGS_COMPRESSED_IMAGE_KEY: &str = "sensor_msgs/msg/CompressedImage";
@@ -53,10 +51,11 @@ const GPS_MSGS_KEY: &str = "sensor_msgs/msg/NavSatFix";
 const BOXES_MSGS_KEY: &str = "foxglove_msgs/msg/ImageAnnotations";
 const CAMERA_INFO_MSGS_KEY: &str = "sensor_msgs/msg/CameraInfo";
 const RAD_CUBE_INFO_MSGS_KEY: &str = "sensor_msgs/msg/RadCube";
+const CAR_INFO_MSGS_KEY: &str = "sensor_msgs/msg/Marker";
 
 pub const NANO_SEC: u128 = 1_000_000_000;
 
-#[derive(Parser, Debug)]
+#[derive(Parser, Debug, Clone)]
 #[command(author, version, about, long_about = None)]
 struct Args {
     /// zenoh connection mode
@@ -118,30 +117,29 @@ async fn write_to_file(
     }
 }
 
-async fn handle_ctrl_c(running: Arc<AtomicBool>) {
-    let mut stream = signal(SignalKind::interrupt()).unwrap();
-    stream.recv().await;
-    running.store(false, Ordering::SeqCst);
-}
-
-async fn stream(
+fn stream(
     channel_id: u16,
     start_time: u128,
     args: &Args,
     tx: Sender<(MessageHeader, Vec<u8>)>,
     subscriber_topic: Subscriber<'_, flume::Receiver<Sample>>,
-    topic: &str,
+    topic: String,
+    mut exit_signal: BusReader<i32>,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let running = Arc::new(AtomicBool::new(true));
-    let running_clone = running.clone();
-    tokio::spawn(handle_ctrl_c(running_clone));
-
     let mut frame_number = 0;
-
     loop {
-        if !running.load(Ordering::SeqCst) {
-            debug!("Program stopped finishing writing MCAP.....");
-            break;
+        match exit_signal.try_recv() {
+            Ok(_) => {
+                debug!("Program stopped finishing writing MCAP.....");
+                break;
+            }
+            Err(e) => match e {
+                TryRecvError::Empty => {}
+                TryRecvError::Disconnected => {
+                    debug!("Program stopped finishing writing MCAP.....");
+                    break;
+                }
+            },
         }
         match subscriber_topic.recv_timeout(Duration::from_secs(10)) {
             Ok(sample) => {
@@ -180,8 +178,8 @@ async fn stream(
 }
 
 fn get_channel<'a>(
-    message_encoding: &'a str,
-    message_topic: &'a str,
+    message_encoding: String,
+    message_topic: String,
     image_schema_data: Vec<u8>,
 ) -> Channel<'a> {
     let image_schema = Schema {
@@ -217,6 +215,7 @@ fn create_hash_map() -> HashMap<&'static str, &'static [u8]> {
     byte_arrays.insert(BOXES_MSGS_KEY, BOXES_MSGS);
     byte_arrays.insert(CAMERA_INFO_MSGS_KEY, CAMERA_INFO_MSGS);
     byte_arrays.insert(RAD_CUBE_INFO_MSGS_KEY, RAD_CUBE_INFO_MSGS);
+    byte_arrays.insert(CAR_INFO_MSGS_KEY, CAR_INFO_MSGS);
     byte_arrays
 }
 
@@ -257,7 +256,7 @@ async fn get_all_topics(args: &Args, session: &Session) -> Vec<String> {
     let wildcard_topic = "*/**";
     let subscriber = match timeout(
         Duration::from_secs(args.timeout),
-        session.declare_subscriber(wildcard_topic).res(),
+        session.declare_subscriber(wildcard_topic).res_async(),
     )
     .await
     {
@@ -297,7 +296,6 @@ async fn get_all_topics(args: &Args, session: &Session) -> Vec<String> {
     drop(subscriber);
     return topic_names;
 }
-
 #[async_std::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut args = Args::parse();
@@ -311,6 +309,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let _ = config.scouting.multicast.set_enabled(Some(false));
 
     let session = zenoh::open(config).res_async().await.unwrap();
+
+    let mut bus = Bus::new(1);
 
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
     if args.topics.len() == 0 && !args.all_topics {
@@ -339,7 +339,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     for topic in &args.topics {
         let subscriber = match timeout(
             Duration::from_secs(args.timeout),
-            session.declare_subscriber(topic).res(),
+            session.declare_subscriber(topic).res_async(),
         )
         .await
         {
@@ -413,41 +413,51 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .duration_since(UNIX_EPOCH)
         .expect("Time went backwards");
     let start_time: u128 = duration.as_nanos();
-
+    let session = session.into_arc();
     for (idx, _item) in cloned_msg_type_vec
         .iter()
         .enumerate()
         .take(args.topics.len())
     {
-        let topic = &args.topics[idx];
+        let topic = args.topics[idx].clone();
         let msg_type = &cloned_msg_type_vec[idx];
         match msg_type {
             Some(mtype) => {
                 if let Some(compressed_video) = byte_arrays.get(mtype.as_str()) {
-                    let channel = get_channel(mtype, topic, compressed_video.to_vec());
+                    let channel =
+                        get_channel(mtype.clone(), topic.clone(), compressed_video.to_vec());
                     let channel_id = out.add_channel(&channel)?;
+                    let start_time = start_time;
+                    let args = args.clone();
+                    let tx = tx.clone();
+                    let session = session.clone();
+                    let rx = bus.add_rx();
+                    futures.push(std::thread::spawn(move || {
+                        let subscriber = session
+                            .declare_subscriber(topic.clone())
+                            .res_sync()
+                            .unwrap();
 
-                    let subscriber = session.declare_subscriber(topic).res().await.unwrap();
-
-                    futures.push(run_and_log_err(
-                        topic,
-                        stream(channel_id, start_time, &args, tx.clone(), subscriber, topic),
-                    ));
+                        stream(channel_id, start_time, &args, tx, subscriber, topic, rx).unwrap()
+                    }));
                 }
             }
             None => continue,
         }
     }
-
+    ctrlc::set_handler(move || {
+        bus.broadcast(1);
+    })
+    .expect("Error setting Ctrl-C handler");
     drop(tx);
     let write_future = run_and_log_err("Writer", write_to_file(out, rx));
 
     let (_, _) = async_scoped::AsyncStdScope::scope_and_block(|s| {
-        for future in futures {
-            s.spawn(future);
-        }
         s.spawn(write_future);
     });
+    for handle in futures {
+        handle.join().unwrap();
+    }
     info!("Saved MCAP to {}", filename.display());
     Ok(())
 }
