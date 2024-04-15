@@ -210,7 +210,7 @@ pub fn calculate_center(x_min: &u32, y_min: &u32, x_max: &u32, y_max: &u32) -> (
 }
 
 pub fn get_radar_data(points: &PointCloud2) -> Result<Vec<Point>, Error> {
-    let radar_data = decode_pointcloud2(&points);
+    let radar_data = decode_pointcloud2(points);
     Ok(radar_data)
 }
 

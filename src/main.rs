@@ -2,10 +2,10 @@ extern crate hostname;
 use anyhow::Result;
 use bus::{Bus, BusReader};
 use chrono::Utc;
-use clap::Parser;
+use clap::{Parser, ValueEnum};
 use futures::Future;
 use log::{debug, error, info, warn};
-use mcap::{records::MessageHeader, Channel, Schema, Writer};
+use mcap::{records::MessageHeader, Channel, Schema, WriteOptions, Writer};
 use std::{
     borrow::Cow,
     collections::{BTreeMap, HashMap, HashSet},
@@ -57,6 +57,23 @@ const CUSTOM_BOXES_2D_INFO_MSGS_KEY: &str = "edgefirst_msgs/msg/DetectBoxes2D";
 
 pub const NANO_SEC: u128 = 1_000_000_000;
 
+#[derive(ValueEnum, Debug, Clone)]
+enum Compression {
+    None,
+    Lz4,
+    Zstd,
+}
+
+impl From<Compression> for Option<mcap::Compression> {
+    fn from(compression: Compression) -> Self {
+        match compression {
+            Compression::None => None,
+            Compression::Lz4 => Some(mcap::Compression::Lz4),
+            Compression::Zstd => Some(mcap::Compression::Zstd),
+        }
+    }
+}
+
 #[derive(Parser, Debug, Clone)]
 #[command(author, version, about, long_about = None)]
 struct Args {
@@ -79,6 +96,10 @@ struct Args {
     /// topic detection timeout in seconds
     #[arg(short, long, default_value = "30")]
     timeout: u64,
+
+    /// mcap compression
+    #[arg(short = 'z', long, value_enum, default_value_t = Compression::None)]
+    compression: Compression,
 
     /// topics
     #[arg(env, required = false, value_delimiter = ' ')]
@@ -316,7 +337,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut bus = Bus::new(1);
 
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
-    if args.topics.len() == 0 && !args.all_topics {
+    if args.topics.is_empty() && !args.all_topics {
         info!("No topics are specified and --all-topics flag is FALSE exiting");
         exit(-1)
     }
@@ -380,7 +401,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         let msg_type = &cloned_msg_type_vec[idx];
         match msg_type {
             Some(s) => {
-                if s != "" {
+                if !s.is_empty() {
                     info!("Successful subscribed to {} and started recording", topic);
                 }
             }
@@ -409,7 +430,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let filename = Path::new(&get_storage()?).join(get_filename());
     info!("Recording to {}", filename.display());
-    let mut out = Writer::new(BufWriter::new(fs::File::create(&filename)?))?;
+    let bufwriter = BufWriter::new(fs::File::create(&filename)?);
+    let mut out = WriteOptions::new()
+        .compression(args.compression.clone().into())
+        .create(bufwriter)?;
 
     let current_time = SystemTime::now();
     let duration = current_time
@@ -430,7 +454,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     let channel =
                         get_channel(mtype.clone(), topic.clone(), compressed_video.to_vec());
                     let channel_id = out.add_channel(&channel)?;
-                    let start_time = start_time;
                     let args = args.clone();
                     let tx = tx.clone();
                     let session = session.clone();
