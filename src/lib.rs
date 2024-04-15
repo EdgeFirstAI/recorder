@@ -20,7 +20,7 @@ use zenoh_ros_type::{
     std_msgs::Header,
 };
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct Point {
     pub x: f32,
     pub y: f32,
@@ -31,7 +31,7 @@ pub struct Point {
     pub power: f32,
     pub rcs: f32,
 }
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct Imu {
     pub roll: f64,
     pub pitch: f64,
@@ -43,13 +43,13 @@ pub struct Imu {
     pub acceleration_y: f64,
     pub acceleration_z: f64,
 }
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct Gps {
     pub latitude: f64,
     pub longitude: f64,
     pub altitude: f64,
 }
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct Boxes3d {
     pub label: i32,
     pub x: f32,
@@ -59,7 +59,7 @@ pub struct Boxes3d {
     pub h: f32,
     pub l: f32,
 }
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct Boxes2d {
     pub label: i32,
     pub x: f32,
@@ -68,7 +68,7 @@ pub struct Boxes2d {
     pub w: f32,
     pub h: f32,
 }
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct Object {
     pub label: String,
     pub label_id: i16,
@@ -91,55 +91,55 @@ pub struct Object {
     pub skeleton_2d: Skeleton2D,
     pub skeleton_3d: Skeleton3D,
 }
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct BoundingBox2Df {
     pub corners: [Keypoint2Df; 4],
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct BoundingBox2Di {
     pub corners: [Keypoint2Di; 4],
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct BoundingBox3D {
     pub corners: [Keypoint3D; 8],
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct Keypoint2Df {
     pub kp: [f32; 2],
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct Keypoint2Di {
     pub kp: [u32; 2],
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct Keypoint3D {
     pub kp: [f32; 3],
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct Skeleton2D {
     #[serde(with = "BigArray")]
     pub kp: [Keypoint2Df; 70],
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct Skeleton3D {
     #[serde(with = "BigArray")]
     pub kp: [Keypoint3D; 70],
 }
 
-#[derive(Deserialize, Serialize)]
+#[derive(Clone, Deserialize, Serialize)]
 pub struct ObjectsStamped {
     pub header: Header,
     pub objects: Vec<Object>,
 }
 
-#[derive(Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct Cube {
     pub layout: Vec<u8>,
     pub shape: Vec<u16>,
@@ -149,7 +149,7 @@ pub struct Cube {
 }
 
 pub fn decode_pointcloud2(points: &PointCloud2) -> Vec<Point> {
-    let mut point_vec = Vec::new();
+    let mut point_vec = Vec::with_capacity(points.height as usize * points.width as usize);
     for i in 0..points.height as usize {
         for j in 0..points.width as usize {
             let start_idx = i * points.row_step as usize + j * points.point_step as usize;
@@ -209,23 +209,23 @@ pub fn calculate_center(x_min: &u32, y_min: &u32, x_max: &u32, y_max: &u32) -> (
     (center_x, center_y)
 }
 
-pub fn get_radar_data(points: PointCloud2) -> Result<Vec<Point>, Error> {
+pub fn get_radar_data(points: &PointCloud2) -> Result<Vec<Point>, Error> {
     let radar_data = decode_pointcloud2(&points);
     Ok(radar_data)
 }
 
-pub fn get_raw_radar_data(message: mcap::Message<'_>) -> Result<PointCloud2, Error> {
+pub fn get_raw_radar_data(message: &mcap::Message<'_>) -> Result<PointCloud2, Error> {
     let points: PointCloud2 =
         cdr::deserialize(&message.data).expect("Failed to deserialize message");
     Ok(points)
 }
 
-pub fn get_raw_imu_data(message: mcap::Message<'_>) -> Result<IMU, Error> {
+pub fn get_raw_imu_data(message: &mcap::Message<'_>) -> Result<IMU, Error> {
     let imu_data: IMU = cdr::deserialize(&message.data).expect("Failed to deserialize message");
     Ok(imu_data)
 }
 
-pub fn get_imu_data(imu_data: IMU) -> Result<Imu> {
+pub fn get_imu_data(imu_data: &IMU) -> Result<Imu> {
     let x = imu_data.orientation.x;
     let y = imu_data.orientation.y;
     let z = imu_data.orientation.z;
@@ -260,13 +260,13 @@ pub fn get_imu_data(imu_data: IMU) -> Result<Imu> {
     })
 }
 
-pub fn get_raw_gps_data(message: mcap::Message<'_>) -> Result<NavSatFix, Error> {
+pub fn get_raw_gps_data(message: &mcap::Message<'_>) -> Result<NavSatFix, Error> {
     let gps_data: NavSatFix =
         cdr::deserialize(&message.data).expect("Failed to deserialize message");
     Ok(gps_data)
 }
 
-pub fn get_gps_data(gps_data: NavSatFix) -> Result<Gps> {
+pub fn get_gps_data(gps_data: &NavSatFix) -> Result<Gps> {
     let latitude = gps_data.latitude;
     let longitude = gps_data.longitude;
     let altitude = gps_data.altitude;
@@ -278,17 +278,17 @@ pub fn get_gps_data(gps_data: NavSatFix) -> Result<Gps> {
     })
 }
 
-pub fn get_raw_obj_data(message: mcap::Message<'_>) -> Result<ObjectsStamped, Error> {
+pub fn get_raw_obj_data(message: &mcap::Message<'_>) -> Result<ObjectsStamped, Error> {
     let deserialized_message: ObjectsStamped =
         cdr::deserialize(&message.data).expect("Failed to deserialize message");
     Ok(deserialized_message)
 }
 
-pub fn get_2d_obj_data(box_2d_data: Vec<Object>) -> Result<Vec<Boxes2d>> {
-    let mut boxes_2d = Vec::new();
+pub fn get_2d_obj_data(box_2d_data: &[Object]) -> Result<Vec<Boxes2d>> {
+    let mut boxes_2d = Vec::with_capacity(box_2d_data.len());
     const IMAGE_WIDTH: f32 = 1280.0;
     const IMAGE_HEIGHT: f32 = 720.0;
-    for object in box_2d_data.iter() {
+    for object in box_2d_data {
         if object.label == "Person" {
             let label = 1;
             let x = object.position[0];
@@ -321,9 +321,9 @@ pub fn get_2d_obj_data(box_2d_data: Vec<Object>) -> Result<Vec<Boxes2d>> {
     Ok(boxes_2d)
 }
 
-pub fn get_3d_obj_data(box_3d_data: Vec<Object>) -> Result<Vec<Boxes3d>> {
-    let mut boxes_3d = Vec::new();
-    for object in box_3d_data.iter() {
+pub fn get_3d_obj_data(box_3d_data: &[Object]) -> Result<Vec<Boxes3d>> {
+    let mut boxes_3d = Vec::with_capacity(box_3d_data.len());
+    for object in box_3d_data {
         if object.label == "Person" {
             let label = 1;
             let x = object.position[0];
@@ -350,7 +350,7 @@ pub fn get_3d_obj_data(box_3d_data: Vec<Object>) -> Result<Vec<Boxes3d>> {
     Ok(boxes_3d)
 }
 
-pub fn get_raw_image_data(message: mcap::Message<'_>) -> Result<FoxgloveCompressedVideo, Error> {
+pub fn get_raw_image_data(message: &mcap::Message<'_>) -> Result<FoxgloveCompressedVideo, Error> {
     let image_data: FoxgloveCompressedVideo =
         cdr::deserialize(&message.data).expect("Failed to deserialize message");
     if image_data.format == "h264" {
@@ -359,7 +359,7 @@ pub fn get_raw_image_data(message: mcap::Message<'_>) -> Result<FoxgloveCompress
     Err(Error::new(ErrorKind::Other, "Video processing failed"))
 }
 
-pub fn get_raw_zed_image_data(message: mcap::Message<'_>) -> Result<Image, Error> {
+pub fn get_raw_zed_image_data(message: &mcap::Message<'_>) -> Result<Image, Error> {
     let image_data: Image = cdr::deserialize(&message.data).expect("Failed to deserialize message");
     Ok(image_data)
 }
@@ -370,7 +370,7 @@ pub fn get_raw_bbox_data(message: &mcap::Message<'_>) -> Result<FoxgloveImageAnn
     Ok(deserialized_message)
 }
 
-pub fn get_raw_cube_data(message: mcap::Message<'_>) -> Result<RadarCube, Error> {
+pub fn get_raw_cube_data(message: &mcap::Message<'_>) -> Result<RadarCube, Error> {
     let cube_data: RadarCube =
         cdr::deserialize(&message.data).expect("Failed to deserialize message");
     Ok(cube_data)
