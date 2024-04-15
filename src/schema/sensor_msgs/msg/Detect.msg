@@ -12,9 +12,6 @@ Time output_time     # Timestamp when the processed output was available
 Box[] boxes          # Array of detected object bounding boxes
                      # Each box includes normalized center point, width, and height
 
-Track[] tracks       # Array of object tracks (if tracking enabled)
-                     # Each track includes ID and lifetime information
-
 ================================================================================
 # Definition of a bounding box
 # Represents a detected object's location in an image
@@ -25,17 +22,20 @@ msg Box:
   float32 center_y   # Normalized y-coordinate of the center
   float32 width      # Normalized width of the box
   float32 height     # Normalized height of the box
-  string labels      # object label
-  float32 scores     # confidence score for detection
-  float32 distances  # Distance of object (if known)
-  float32 speeds     # Speed of object (if known)
+  string label      # object label
+  float32 score     # confidence score for detection
+  float32 distance  # Distance of object (if known)
+  float32 speed     # Speed of object (if known)
+  bool is_tracked    # Is the object being tracked
+  Track track       # object tracking, each track includes ID and lifetime information
 
 ================================================================================
 # Definition of an object track
 # Represents the trajectory and lifetime of a detected object
 msg Track:
-  int32 id           # Unique identifier for the object track
+  string id           # Unique identifier for the object track
   int32 lifetime     # Number of consecutive frames the object has been tracked
+  Time created       # Time the track was first added
 
 ================================================================================
 MSG: std_msgs/Header
