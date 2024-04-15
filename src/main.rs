@@ -40,8 +40,9 @@ pub const IMU_MSGS: &[u8] = include_bytes!("schema/sensor_msgs/msg/Imu.msg");
 pub const GPS_MSGS: &[u8] = include_bytes!("schema/sensor_msgs/msg/Gps.msg");
 pub const BOXES_MSGS: &[u8] = include_bytes!("schema/foxglove_msgs/msg/ImageAnnotation.msg");
 pub const CAMERA_INFO_MSGS: &[u8] = include_bytes!("schema/sensor_msgs/msg/CameraInfo.msg");
-pub const RAD_CUBE_INFO_MSGS: &[u8] = include_bytes!("schema/sensor_msgs/msg/RadCube.msg");
+pub const RAD_CUBE_INFO_MSGS: &[u8] = include_bytes!("schema/edgefirst/msg/RadCube.msg");
 pub const CAR_INFO_MSGS: &[u8] = include_bytes!("schema/sensor_msgs/msg/Marker.msg");
+pub const CUSTOM_BOXES_2D_INFO_MSGS: &[u8] = include_bytes!("schema/edgefirst/msg/Detect.msg");
 
 const FOXGLOVE_MSGS_COMPRESSED_VIDEO_KEY: &str = "foxglove_msgs/msg/CompressedVideo";
 const FOXGLOVE_MSGS_COMPRESSED_IMAGE_KEY: &str = "sensor_msgs/msg/CompressedImage";
@@ -52,6 +53,7 @@ const BOXES_MSGS_KEY: &str = "foxglove_msgs/msg/ImageAnnotations";
 const CAMERA_INFO_MSGS_KEY: &str = "sensor_msgs/msg/CameraInfo";
 const RAD_CUBE_INFO_MSGS_KEY: &str = "sensor_msgs/msg/RadCube";
 const CAR_INFO_MSGS_KEY: &str = "sensor_msgs/msg/Marker";
+const CUSTOM_BOXES_2D_INFO_MSGS_KEY: &str = "edgefirst_msgs/msg/DetectBoxes2D";
 
 pub const NANO_SEC: u128 = 1_000_000_000;
 
@@ -216,6 +218,7 @@ fn create_hash_map() -> HashMap<&'static str, &'static [u8]> {
     byte_arrays.insert(CAMERA_INFO_MSGS_KEY, CAMERA_INFO_MSGS);
     byte_arrays.insert(RAD_CUBE_INFO_MSGS_KEY, RAD_CUBE_INFO_MSGS);
     byte_arrays.insert(CAR_INFO_MSGS_KEY, CAR_INFO_MSGS);
+    byte_arrays.insert(CUSTOM_BOXES_2D_INFO_MSGS_KEY, CUSTOM_BOXES_2D_INFO_MSGS);
     byte_arrays
 }
 
@@ -294,7 +297,7 @@ async fn get_all_topics(args: &Args, session: &Session) -> Vec<String> {
         }
     }
     drop(subscriber);
-    return topic_names;
+    topic_names
 }
 #[async_std::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
