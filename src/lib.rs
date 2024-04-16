@@ -13,7 +13,7 @@ use std::{
     io::{Error, ErrorKind},
     result::Result::Ok,
 };
-use zenoh_ros_type::{
+use edgefirst_schemas::{
     edgefirst_msgs::RadarCube,
     foxglove_msgs::{FoxgloveCompressedVideo, FoxgloveImageAnnotations},
     sensor_msgs::{point_field::FLOAT32, CameraInfo, Image, NavSatFix, PointCloud2, IMU},
