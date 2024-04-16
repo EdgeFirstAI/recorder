@@ -8,7 +8,7 @@ use log::{debug, error, info, warn};
 use mcap::{records::MessageHeader, Channel, Schema, WriteOptions, Writer};
 use std::{
     borrow::Cow,
-    collections::{BTreeMap, HashMap, HashSet},
+    collections::{BTreeMap, HashSet},
     error::Error,
     fs,
     io::BufWriter,
@@ -31,29 +31,7 @@ use zenoh::{
     Session,
 };
 
-pub const FOXGLOVE_MSGS_COMPRESSED_VIDEO: &[u8] =
-    include_bytes!("schema/foxglove_msgs/msg/CompressedVideo.msg");
-pub const FOXGLOVE_MSGS_COMPRESSED_IMAGE: &[u8] =
-    include_bytes!("schema/foxglove_msgs/msg/CompressedImage.msg");
-pub const POINTCLOUD_MSGS: &[u8] = include_bytes!("schema/sensor_msgs/msg/PointCloud2.msg");
-pub const IMU_MSGS: &[u8] = include_bytes!("schema/sensor_msgs/msg/Imu.msg");
-pub const GPS_MSGS: &[u8] = include_bytes!("schema/sensor_msgs/msg/Gps.msg");
-pub const BOXES_MSGS: &[u8] = include_bytes!("schema/foxglove_msgs/msg/ImageAnnotation.msg");
-pub const CAMERA_INFO_MSGS: &[u8] = include_bytes!("schema/sensor_msgs/msg/CameraInfo.msg");
-pub const RAD_CUBE_INFO_MSGS: &[u8] = include_bytes!("schema/edgefirst/msg/RadCube.msg");
-pub const CAR_INFO_MSGS: &[u8] = include_bytes!("schema/sensor_msgs/msg/Marker.msg");
-pub const CUSTOM_BOXES_2D_INFO_MSGS: &[u8] = include_bytes!("schema/edgefirst/msg/Detect.msg");
-
-const FOXGLOVE_MSGS_COMPRESSED_VIDEO_KEY: &str = "foxglove_msgs/msg/CompressedVideo";
-const FOXGLOVE_MSGS_COMPRESSED_IMAGE_KEY: &str = "sensor_msgs/msg/CompressedImage";
-const POINTCLOUD_MSGS_KEY: &str = "sensor_msgs/msg/PointCloud2";
-const IMU_MSGS_KEY: &str = "sensor_msgs/msg/Imu";
-const GPS_MSGS_KEY: &str = "sensor_msgs/msg/NavSatFix";
-const BOXES_MSGS_KEY: &str = "foxglove_msgs/msg/ImageAnnotations";
-const CAMERA_INFO_MSGS_KEY: &str = "sensor_msgs/msg/CameraInfo";
-const RAD_CUBE_INFO_MSGS_KEY: &str = "sensor_msgs/msg/RadCube";
-const CAR_INFO_MSGS_KEY: &str = "sensor_msgs/msg/Marker";
-const CUSTOM_BOXES_2D_INFO_MSGS_KEY: &str = "edgefirst_msgs/msg/DetectBoxes2D";
+mod schemas;
 
 pub const NANO_SEC: u128 = 1_000_000_000;
 
@@ -200,49 +178,6 @@ fn stream(
     Ok(())
 }
 
-fn get_channel<'a>(
-    message_encoding: String,
-    message_topic: String,
-    image_schema_data: Vec<u8>,
-) -> Channel<'a> {
-    let image_schema = Schema {
-        name: message_encoding.to_string(),
-        encoding: String::from("ros2msg"),
-        data: Cow::Owned(image_schema_data),
-    };
-    let image_schema_arc = Arc::new(image_schema);
-    let modified_topic = message_topic.replace("rt", "");
-    debug!("{:?}", modified_topic);
-    let image_channel: Channel<'a> = Channel {
-        topic: modified_topic.to_string(),
-        schema: Some(Arc::clone(&image_schema_arc)),
-        message_encoding: String::from("cdr"),
-        metadata: BTreeMap::default(),
-    };
-    image_channel
-}
-
-fn create_hash_map() -> HashMap<&'static str, &'static [u8]> {
-    let mut byte_arrays: HashMap<&str, &[u8]> = HashMap::new();
-    byte_arrays.insert(
-        FOXGLOVE_MSGS_COMPRESSED_VIDEO_KEY,
-        FOXGLOVE_MSGS_COMPRESSED_VIDEO,
-    );
-    byte_arrays.insert(
-        FOXGLOVE_MSGS_COMPRESSED_IMAGE_KEY,
-        FOXGLOVE_MSGS_COMPRESSED_IMAGE,
-    );
-    byte_arrays.insert(POINTCLOUD_MSGS_KEY, POINTCLOUD_MSGS);
-    byte_arrays.insert(IMU_MSGS_KEY, IMU_MSGS);
-    byte_arrays.insert(GPS_MSGS_KEY, GPS_MSGS);
-    byte_arrays.insert(BOXES_MSGS_KEY, BOXES_MSGS);
-    byte_arrays.insert(CAMERA_INFO_MSGS_KEY, CAMERA_INFO_MSGS);
-    byte_arrays.insert(RAD_CUBE_INFO_MSGS_KEY, RAD_CUBE_INFO_MSGS);
-    byte_arrays.insert(CAR_INFO_MSGS_KEY, CAR_INFO_MSGS);
-    byte_arrays.insert(CUSTOM_BOXES_2D_INFO_MSGS_KEY, CUSTOM_BOXES_2D_INFO_MSGS);
-    byte_arrays
-}
-
 fn get_storage() -> Result<String, std::io::Error> {
     match std::env::var("STORAGE") {
         // If the environment variable is not set, return only the filename.
@@ -322,8 +257,9 @@ async fn get_all_topics(args: &Args, session: &Session) -> Vec<String> {
 }
 #[async_std::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let schemas = schemas::get_all();
+
     let mut args = Args::parse();
-    let byte_arrays = create_hash_map();
     let mut config = Config::default();
 
     let mode = WhatAmI::from_str(&args.mode).unwrap();
@@ -357,7 +293,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         *topic = fixed_topic;
     }
 
-    let mut cloned_msg_type_vec = Vec::new();
+    let mut msg_types = Vec::new();
     let (tx, rx) = mpsc::channel();
 
     for topic in &args.topics {
@@ -389,16 +325,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 },
                 Err(_) => None,
             };
-        cloned_msg_type_vec.push(msg_type);
+        msg_types.push(msg_type);
     }
 
-    for (idx, _item) in cloned_msg_type_vec
-        .iter()
-        .enumerate()
-        .take(args.topics.len())
-    {
+    for (idx, _item) in msg_types.iter().enumerate().take(args.topics.len()) {
         let topic = &args.topics[idx];
-        let msg_type = &cloned_msg_type_vec[idx];
+        let msg_type = &msg_types[idx];
         match msg_type {
             Some(s) => {
                 if !s.is_empty() {
@@ -415,8 +347,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     }
 
-    debug!("Subscribed to {:?} ", cloned_msg_type_vec);
-    let should_exit = cloned_msg_type_vec
+    debug!("Subscribed to {:?} ", msg_types);
+    let should_exit = msg_types
         .iter()
         .all(|x| matches!(x, Some(s) if s.is_empty()) || x.is_none());
 
@@ -425,7 +357,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         exit(-1);
     }
 
-    assert!(args.topics.len() == cloned_msg_type_vec.len());
+    assert!(args.topics.len() == msg_types.len());
     let mut futures = Vec::new();
 
     let filename = Path::new(&get_storage()?).join(get_filename());
@@ -441,19 +373,22 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .expect("Time went backwards");
     let start_time: u128 = duration.as_nanos();
     let session = session.into_arc();
-    for (idx, _item) in cloned_msg_type_vec
-        .iter()
-        .enumerate()
-        .take(args.topics.len())
-    {
+    for (idx, _item) in msg_types.iter().enumerate().take(args.topics.len()) {
         let topic = args.topics[idx].clone();
-        let msg_type = &cloned_msg_type_vec[idx];
-        match msg_type {
-            Some(mtype) => {
-                if let Some(compressed_video) = byte_arrays.get(mtype.as_str()) {
-                    let channel =
-                        get_channel(mtype.clone(), topic.clone(), compressed_video.to_vec());
-                    let channel_id = out.add_channel(&channel)?;
+        match &msg_types[idx] {
+            Some(msg_type) => {
+                if let Some(schema) = schemas.get(format!("schemas/{}.msg", msg_type).as_str()) {
+                    let schema = Schema {
+                        name: msg_type.clone(),
+                        encoding: "ros2msg".to_owned(),
+                        data: Cow::from(schema.as_bytes()),
+                    };
+                    let channel_id = out.add_channel(&Channel {
+                        topic: topic.replace("rt", ""),
+                        schema: Some(Arc::new(schema)),
+                        message_encoding: String::from("cdr"),
+                        metadata: BTreeMap::default(),
+                    })?;
                     let args = args.clone();
                     let tx = tx.clone();
                     let session = session.clone();
@@ -463,7 +398,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                             .declare_subscriber(topic.clone())
                             .res_sync()
                             .unwrap();
-
                         stream(channel_id, start_time, &args, tx, subscriber, topic, rx).unwrap()
                     }));
                 }
