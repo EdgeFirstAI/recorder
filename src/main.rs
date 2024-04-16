@@ -1,19 +1,18 @@
 extern crate hostname;
 use anyhow::Result;
+
 use bus::{Bus, BusReader};
 use chrono::Utc;
 use clap::{Parser, ValueEnum};
-use futures::Future;
 use log::{debug, error, info, warn};
 use mcap::{records::MessageHeader, Channel, Schema, WriteOptions, Writer};
 use std::{
     borrow::Cow,
-    collections::{BTreeMap, HashSet},
+    collections::{BTreeMap, HashMap, HashSet},
     error::Error,
     fs,
     io::BufWriter,
     path::Path,
-    process::exit,
     str::FromStr,
     sync::{
         mpsc::{self, Receiver, Sender, TryRecvError},
@@ -88,28 +87,13 @@ struct Args {
     all_topics: bool,
 }
 
-async fn run_and_log_err(name: &str, future: impl Future<Output = Result<(), Box<dyn Error>>>) {
-    match future.await {
-        Ok(_) => {
-            log::debug!("{name} has finished running");
-        }
-        Err(e) => {
-            log::error!("{name} exited with error: {e}");
-            log::logger().flush();
-        }
-    }
-}
-
 async fn write_to_file(
     mut out: Writer<'_, BufWriter<fs::File>>,
     rx: Receiver<(MessageHeader, Vec<u8>)>,
 ) -> Result<(), Box<dyn Error>> {
     loop {
         match rx.recv() {
-            Ok((header, data)) => match out.write_to_known_channel(&header, &data) {
-                Ok(_) => (),
-                Err(e) => error!("Error writing to channel: {}", e),
-            },
+            Ok((header, data)) => out.write_to_known_channel(&header, &data)?,
             Err(_) => {
                 out.finish()?;
                 return Ok(());
@@ -211,56 +195,40 @@ fn get_filename() -> String {
     }
 }
 
-async fn get_all_topics(args: &Args, session: &Session) -> Vec<String> {
-    let wildcard_topic = "*/**";
+async fn discover_topics(args: &Args, session: &Session) -> Result<Vec<String>, Box<dyn Error>> {
     let subscriber = match timeout(
         Duration::from_secs(args.timeout),
-        session.declare_subscriber(wildcard_topic).res_async(),
+        session.declare_subscriber("**").res_async(),
     )
-    .await
+    .await?
     {
-        Ok(result) => match result {
-            Ok(subscriber) => subscriber,
-            Err(err) => {
-                panic!("Error declaring subscriber: {:?}", err);
-            }
-        },
-        Err(_) => {
-            panic!("Timeout occurred while waiting for subscriber declaration.");
-        }
+        Ok(subscriber) => subscriber,
+        Err(err) => return Err(err),
     };
 
-    let mut topic_names = Vec::new();
-    let mut unique_topics = HashSet::new();
-
+    let mut topics = HashSet::new();
     let start_time = Instant::now();
+
     while start_time.elapsed() < Duration::from_secs(args.timeout) {
-        match subscriber.recv_timeout(Duration::from_secs(args.timeout)) {
-            Ok(topic) => {
-                if unique_topics.insert(topic.key_expr.to_string()) {
-                    topic_names.push(topic.key_expr.to_string().clone());
-                    info!(
-                        "Found {:?} will start recording in {:?} seconds",
-                        topic.key_expr.to_string().clone(),
-                        (Duration::from_secs(args.timeout) - start_time.elapsed()).as_secs() as i64
-                    );
-                }
-            }
-            Err(err) => {
-                error!("Error receiving message: {:?}", err);
-                break;
-            }
+        let topic = subscriber.recv_timeout(Duration::from_secs(args.timeout))?;
+        if topics.insert(topic.key_expr.to_string()) {
+            info!(
+                "Found {:?} will start recording in {:?} seconds",
+                topic.key_expr.to_string().clone(),
+                (Duration::from_secs(args.timeout) - start_time.elapsed()).as_secs() as i64
+            );
         }
     }
+
     drop(subscriber);
-    topic_names
+    Ok(Vec::from_iter(topics))
 }
+
 #[async_std::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let schemas = schemas::get_all();
-
     let mut args = Args::parse();
     let mut config = Config::default();
+    let schemas = schemas::get_all();
 
     let mode = WhatAmI::from_str(&args.mode).unwrap();
     config.set_mode(Some(mode)).unwrap();
@@ -270,99 +238,65 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let session = zenoh::open(config).res_async().await.unwrap();
 
-    let mut bus = Bus::new(1);
-
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
     if args.topics.is_empty() && !args.all_topics {
-        info!("No topics are specified and --all-topics flag is FALSE exiting");
-        exit(-1)
+        return Err("No topics are specified and --all-topics flag is FALSE exiting".into());
     }
 
-    if args.all_topics {
-        let topic_list: Vec<String> = get_all_topics(&args, &session).await;
-        args.topics = topic_list
-    }
+    args.topics = match args.all_topics {
+        true => match discover_topics(&args, &session).await {
+            Ok(topics) => topics,
+            Err(e) => return Err(format!("unable to discover topics: {}", e).into()),
+        },
+        false => args.topics,
+    };
 
-    for topic in &mut args.topics {
-        let mut fixed_topic = topic.to_string();
-        if !topic.starts_with("rt/") && !topic.starts_with('/') {
-            fixed_topic = format!("rt/{}", topic);
-        } else if topic.starts_with('/') {
-            fixed_topic = format!("rt{}", topic);
-        }
-        *topic = fixed_topic;
-    }
+    args.topics = args
+        .topics
+        .iter()
+        .map(|topic| {
+            if topic.starts_with('/') {
+                format!("rt{}", topic)
+            } else if !topic.starts_with("rt/") {
+                format!("rt/{}", topic)
+            } else {
+                topic.to_owned()
+            }
+        })
+        .collect();
 
-    let mut msg_types = Vec::new();
-    let (tx, rx) = mpsc::channel();
+    let mut topics = HashMap::new();
 
     for topic in &args.topics {
         let subscriber = match timeout(
             Duration::from_secs(args.timeout),
             session.declare_subscriber(topic).res_async(),
         )
-        .await
+        .await?
         {
-            Ok(result) => match result {
-                Ok(subscriber) => subscriber,
-                Err(err) => {
-                    panic!("Error declaring subscriber: {:?}", err);
-                }
-            },
-            Err(_) => {
-                continue;
-            }
+            Ok(subscriber) => subscriber,
+            Err(err) => return Err(format!("failed to declare subscriber: {err}").into()),
         };
 
-        let msg_type: Option<String> =
-            match subscriber.recv_timeout(Duration::from_secs(args.timeout)) {
-                Ok(sample) => match String::from_str(sample.encoding.suffix()) {
-                    Ok(v) => {
-                        debug!("Received message type: {}", v);
-                        Some(v)
-                    }
-                    Err(_) => None,
-                },
-                Err(_) => None,
-            };
-        msg_types.push(msg_type);
-    }
-
-    for (idx, _item) in msg_types.iter().enumerate().take(args.topics.len()) {
-        let topic = &args.topics[idx];
-        let msg_type = &msg_types[idx];
-        match msg_type {
-            Some(s) => {
-                if !s.is_empty() {
-                    info!("Successful subscribed to {} and started recording", topic);
-                }
-            }
-            None => {
-                warn!(
-                    "Timeout occurred while waiting for a message on topic {}",
-                    topic
-                );
-                continue;
-            }
+        if let Ok(sample) = subscriber.recv_timeout(Duration::from_secs(args.timeout)) {
+            info!("Subscribed to {} and started recording", topic);
+            topics.insert(topic, sample.encoding.suffix().to_string());
+        } else {
+            warn!("Timed out waiting on topic {}", topic);
         }
     }
 
-    debug!("Subscribed to {:?} ", msg_types);
-    let should_exit = msg_types
-        .iter()
-        .all(|x| matches!(x, Some(s) if s.is_empty()) || x.is_none());
-
-    if should_exit {
-        info!("Found no suitable schema for any of the topics exiting");
-        exit(-1);
+    if topics.is_empty() {
+        return Err("No valid topics discovered".into());
     }
-
-    assert!(args.topics.len() == msg_types.len());
-    let mut futures = Vec::new();
 
     let filename = Path::new(&get_storage()?).join(get_filename());
     info!("Recording to {}", filename.display());
-    let bufwriter = BufWriter::new(fs::File::create(&filename)?);
+    let file = match fs::File::create(&filename) {
+        Ok(file) => file,
+        Err(e) => return Err(format!("Failed to create {}: {}", filename.display(), e).into()),
+    };
+    let bufwriter = BufWriter::new(file);
     let mut out = WriteOptions::new()
         .compression(args.compression.clone().into())
         .create(bufwriter)?;
@@ -373,51 +307,59 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .expect("Time went backwards");
     let start_time: u128 = duration.as_nanos();
     let session = session.into_arc();
-    for (idx, _item) in msg_types.iter().enumerate().take(args.topics.len()) {
-        let topic = args.topics[idx].clone();
-        match &msg_types[idx] {
-            Some(msg_type) => {
-                if let Some(schema) = schemas.get(format!("schemas/{}.msg", msg_type).as_str()) {
-                    let schema = Schema {
-                        name: msg_type.clone(),
-                        encoding: "ros2msg".to_owned(),
-                        data: Cow::from(schema.as_bytes()),
-                    };
-                    let channel_id = out.add_channel(&Channel {
-                        topic: topic.replace("rt", ""),
-                        schema: Some(Arc::new(schema)),
-                        message_encoding: String::from("cdr"),
-                        metadata: BTreeMap::default(),
-                    })?;
-                    let args = args.clone();
-                    let tx = tx.clone();
-                    let session = session.clone();
-                    let rx = bus.add_rx();
-                    futures.push(std::thread::spawn(move || {
-                        let subscriber = session
-                            .declare_subscriber(topic.clone())
-                            .res_sync()
-                            .unwrap();
-                        stream(channel_id, start_time, &args, tx, subscriber, topic, rx).unwrap()
-                    }));
-                }
+
+    let mut bus = Bus::new(1);
+    let mut futures = Vec::new();
+    let (tx, rx) = mpsc::channel();
+
+    for (topic, encoding) in topics {
+        match schemas.get(format!("schemas/{}.msg", encoding).as_str()) {
+            Some(schema) => {
+                let schema = Schema {
+                    name: encoding.clone(),
+                    encoding: "ros2msg".to_owned(),
+                    data: Cow::from(schema.as_bytes()),
+                };
+
+                let channel_id = out.add_channel(&Channel {
+                    topic: topic.replace("rt", ""),
+                    schema: Some(Arc::new(schema)),
+                    message_encoding: String::from("cdr"),
+                    metadata: BTreeMap::default(),
+                })?;
+
+                let args = args.clone();
+                let tx = tx.clone();
+                let session = session.clone();
+                let rx = bus.add_rx();
+                let topic = topic.clone();
+
+                futures.push(std::thread::spawn(move || {
+                    let subscriber = session
+                        .declare_subscriber(topic.clone())
+                        .res_sync()
+                        .unwrap();
+                    stream(channel_id, start_time, &args, tx, subscriber, topic, rx).unwrap()
+                }));
             }
-            None => continue,
+            None => {
+                warn!("No schema found for topic: {topic} encoding: {encoding}");
+                continue;
+            }
         }
     }
-    ctrlc::set_handler(move || {
-        bus.broadcast(1);
-    })
-    .expect("Error setting Ctrl-C handler");
-    drop(tx);
-    let write_future = run_and_log_err("Writer", write_to_file(out, rx));
 
-    let (_, _) = async_scoped::AsyncStdScope::scope_and_block(|s| {
-        s.spawn(write_future);
-    });
-    for handle in futures {
-        handle.join().unwrap();
+    ctrlc::set_handler(move || bus.broadcast(1)).expect("Error setting Ctrl-C handler");
+    drop(tx);
+
+    if let Err(err) = write_to_file(out, rx).await {
+        return Err(format!("Error writing to file: {}", err).into());
     }
+
+    for fut in futures {
+        fut.join().unwrap();
+    }
+
     info!("Saved MCAP to {}", filename.display());
     Ok(())
 }
