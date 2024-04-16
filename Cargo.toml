@@ -28,7 +28,7 @@ camino = "1.1.6"
 memmap = "0.7.0"
 cdr = "0.2"
 zenoh = "0.10.0-rc"
-edgefirst-schemas = "1.0"
+edgefirst-schemas = { git = "https://github.com/MaivinAI/schemas", rev = "a64a341" }
 serde-big-array = "0.5.1"
 futures = "0.3.29"
 tokio = { version = "1", features = ["full"] }
