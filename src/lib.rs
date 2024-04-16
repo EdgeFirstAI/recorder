@@ -5,19 +5,20 @@
 
 use anyhow::{Context, Result};
 use camino::Utf8Path;
-use memmap::Mmap;
-use serde::{Deserialize, Serialize};
-use serde_big_array::BigArray;
-use std::{
-    fs,
-    io::{Error, ErrorKind},
-    result::Result::Ok,
-};
 use edgefirst_schemas::{
     edgefirst_msgs::RadarCube,
     foxglove_msgs::{FoxgloveCompressedVideo, FoxgloveImageAnnotations},
     sensor_msgs::{point_field::FLOAT32, CameraInfo, Image, NavSatFix, PointCloud2, IMU},
     std_msgs::Header,
+};
+use memmap::Mmap;
+use serde::{Deserialize, Serialize};
+use serde_big_array::BigArray;
+use std::fmt;
+use std::{
+    fs,
+    io::{Error, ErrorKind},
+    result::Result::Ok,
 };
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -31,6 +32,17 @@ pub struct Point {
     pub power: f32,
     pub rcs: f32,
 }
+
+impl fmt::Display for Point {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "{} {} {} {} {} {} {}",
+            self.x, self.y, self.z, self.radial_speed, self.rcs, self.noise, self.power,
+        )
+    }
+}
+
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct Imu {
     pub roll: f64,
