@@ -28,12 +28,12 @@ camino = "1.1.6"
 memmap = "0.7.0"
 cdr = "0.2"
 zenoh = "0.10.0-rc"
-edgefirst-schemas = { git = "https://github.com/MaivinAI/schemas", rev = "a64a341" }
+edgefirst-schemas = "1.1"
 serde-big-array = "0.5.1"
 futures = "0.3.29"
 tokio = { version = "1", features = ["full"] }
 chrono = "0.4"
-hostname = "0.3.1"
+hostname = "0.4.0"
 log = "0.4.20"
 clap = { version = "4.1", features = ["derive", "env"] }
 async-std = {version = "1.12", features = ["attributes"] }

@@ -14,9 +14,8 @@ use edgefirst_schemas::{
 use memmap::Mmap;
 use serde::{Deserialize, Serialize};
 use serde_big_array::BigArray;
-use std::fmt;
 use std::{
-    fs,
+    fmt, fs,
     io::{Error, ErrorKind},
     result::Result::Ok,
 };
