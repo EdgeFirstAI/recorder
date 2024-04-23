@@ -115,13 +115,19 @@ fn stream(
     loop {
         match exit_signal.try_recv() {
             Ok(_) => {
-                debug!("Program stopped finishing writing MCAP.....");
+                debug!(
+                    "Program stopped finishing writing MCAP for {:?}.....",
+                    topic
+                );
                 break;
             }
             Err(e) => match e {
                 TryRecvError::Empty => {}
                 TryRecvError::Disconnected => {
-                    debug!("Program stopped finishing writing MCAP.....");
+                    debug!(
+                        "Program stopped finishing writing MCAP for {:?}.....",
+                        topic
+                    );
                     break;
                 }
             },
