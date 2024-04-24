@@ -6,7 +6,7 @@
 use anyhow::{Context, Result};
 use camino::Utf8Path;
 use edgefirst_schemas::{
-    edgefirst_msgs::RadarCube,
+    edgefirst_msgs::{Detect, RadarCube},
     foxglove_msgs::{FoxgloveCompressedVideo, FoxgloveImageAnnotations},
     sensor_msgs::{point_field::FLOAT32, CameraInfo, Image, NavSatFix, PointCloud2, IMU},
     std_msgs::Header,
@@ -379,6 +379,12 @@ pub fn get_raw_bbox_data(message: &mcap::Message<'_>) -> Result<FoxgloveImageAnn
     let deserialized_message: FoxgloveImageAnnotations =
         cdr::deserialize(&message.data).expect("Failed to deserialize message");
     Ok(deserialized_message)
+}
+
+pub fn get_detect_data(message: &mcap::Message<'_>) -> Result<Detect, Error> {
+    let detect_message: Detect =
+        cdr::deserialize(&message.data).expect("Failed to deserialize message");
+    Ok(detect_message)
 }
 
 pub fn get_raw_cube_data(message: &mcap::Message<'_>) -> Result<RadarCube, Error> {
