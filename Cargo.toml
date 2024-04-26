@@ -5,9 +5,6 @@ authors = ["Au-Zone Technologies"]
 version = "0.0.0"
 edition = "2021"
 
-[lib]
-name = "maivin_reader"
-
 [profile.release]
 opt-level = 3
 lto = true
