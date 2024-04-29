@@ -30,6 +30,9 @@ use zenoh::{
     Session,
 };
 
+extern crate signal_hook;
+use signal_hook::{consts::signal::*, iterator::Signals};
+
 mod schemas;
 
 pub const NANO_SEC: u128 = 1_000_000_000;
@@ -355,7 +358,24 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     }
 
-    ctrlc::set_handler(move || bus.broadcast(1)).expect("Error setting Ctrl-C handler");
+    let mut signals = Signals::new(&[SIGINT, SIGTERM]).expect("Error creating signal iterator");
+    std::thread::spawn(move || {
+        for signal in signals.forever() {
+            match signal {
+                SIGINT => {
+                    debug!("Received Ctrl+C (SIGINT) signal");
+                    bus.broadcast(1);
+                    break;
+                }
+                SIGTERM => {
+                    bus.broadcast(1);
+                    debug!("Received SIGTERM signal");
+                    break;
+                }
+                _ => unreachable!(),
+            }
+        }
+    });
     drop(tx);
 
     if let Err(err) = write_to_file(out, rx).await {
