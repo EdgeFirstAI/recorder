@@ -358,7 +358,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     }
 
-    let mut signals = Signals::new(&[SIGINT, SIGTERM]).expect("Error creating signal iterator");
+    let mut signals = Signals::new([SIGINT, SIGTERM]).expect("Error creating signal iterator");
     std::thread::spawn(move || {
         for signal in signals.forever() {
             match signal {
@@ -372,7 +372,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     debug!("Received SIGTERM signal");
                     break;
                 }
-                _ => unreachable!(),
+                _ => {}
             }
         }
     });
