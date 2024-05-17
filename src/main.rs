@@ -2,7 +2,7 @@ extern crate hostname;
 use anyhow::Result;
 
 use bus::{Bus, BusReader};
-use chrono::Utc;
+use chrono::Local;
 use clap::{Parser, ValueEnum};
 use log::{debug, error, info, warn};
 use mcap::{records::MessageHeader, Channel, Schema, WriteOptions, Writer};
@@ -32,6 +32,8 @@ use zenoh::{
 
 extern crate signal_hook;
 use signal_hook::{consts::signal::*, iterator::Signals};
+
+use std::io::{Error as e, ErrorKind};
 
 mod schemas;
 
@@ -189,7 +191,7 @@ fn get_storage() -> Result<String, std::io::Error> {
 }
 
 fn get_filename() -> String {
-    let current_time = Utc::now();
+    let current_time = Local::now();
     let formatted_time = current_time.format("%Y_%m_%d_%H_%M_%S").to_string();
     match hostname::get() {
         // If hostname fails for whatever reason then use maivin-recorder as the prefix.
@@ -274,24 +276,66 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         })
         .collect();
 
-    let mut topics = HashMap::new();
+    let mut tasks = Vec::new();
+    let session = session.into_arc();
 
     for topic in &args.topics {
-        let subscriber = match timeout(
-            Duration::from_secs(args.timeout),
-            session.declare_subscriber(topic).res_async(),
-        )
-        .await?
-        {
-            Ok(subscriber) => subscriber,
-            Err(err) => return Err(format!("failed to declare subscriber: {err}").into()),
-        };
+        let topic = topic.clone(); // Cloning topic if needed later
+        let session_arc = Arc::new(session.clone());
+        let task = tokio::spawn(async move {
+            let subscriber = match timeout(
+                Duration::from_secs(args.timeout),
+                session_arc.declare_subscriber(&topic).res_async(),
+            )
+            .await
+            {
+                Ok(Ok(subscriber)) => subscriber,
+                Ok(Err(err)) => {
+                    return Err(e::new(
+                        ErrorKind::Other,
+                        format!("failed to declare subscriber: {}", err),
+                    ));
+                }
+                Err(_) => {
+                    return Err(e::new(
+                        ErrorKind::Other,
+                        "timeout while declaring subscriber",
+                    ));
+                }
+            };
 
-        if let Ok(sample) = subscriber.recv_timeout(Duration::from_secs(args.timeout)) {
-            info!("Subscribed to {} and started recording", topic);
-            topics.insert(topic, sample.encoding.suffix().to_string());
-        } else {
-            warn!("Timed out waiting on topic {}", topic);
+            let enc = match subscriber.recv_timeout(Duration::from_secs(args.timeout)) {
+                Ok(sample) => sample.encoding.suffix().to_string(),
+                Err(_) => {
+                    warn!("Timed out waiting on topic {}", topic);
+                    "Topic Unavailable".to_string()
+                }
+            };
+            Ok((topic, enc))
+        });
+
+        tasks.push(task);
+    }
+
+    let mut topics = HashMap::new();
+
+    for task in tasks {
+        match task.await {
+            Ok(result) => match result {
+                Ok((topic, encoding)) => {
+                    info!("Subscribed to {} and started recording", topic);
+                    debug!("Encoding for {:?} is {:?}", topic, encoding);
+                    if encoding != "Topic Unavailable".to_string() {
+                        topics.insert(topic, encoding);
+                    }
+                }
+                Err(err) => {
+                    warn!("{}", err);
+                }
+            },
+            Err(err) => {
+                warn!("Error occurred: {}", err);
+            }
         }
     }
 
@@ -315,7 +359,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .duration_since(UNIX_EPOCH)
         .expect("Time went backwards");
     let start_time: u128 = duration.as_nanos();
-    let session = session.into_arc();
 
     let mut bus = Bus::new(1);
     let mut futures = Vec::new();
