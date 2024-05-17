@@ -323,9 +323,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         match task.await {
             Ok(result) => match result {
                 Ok((topic, encoding)) => {
-                    info!("Subscribed to {} and started recording", topic);
                     debug!("Encoding for {:?} is {:?}", topic, encoding);
-                    if encoding != "Topic Unavailable".to_string() {
+                    if encoding != "Topic Unavailable" {
+                        info!("Subscribed to {} and started recording", topic);
                         topics.insert(topic, encoding);
                     }
                 }
