@@ -80,7 +80,7 @@ struct Args {
     timeout: u64,
 
     /// mcap compression
-    #[arg(short = 'z', long, value_enum, default_value_t = Compression::None)]
+    #[arg(env, short = 'z', long, value_enum, default_value_t = Compression::None)]
     compression: Compression,
 
     /// topics
