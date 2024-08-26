@@ -90,6 +90,10 @@ struct Args {
     /// will look for all topics and start recording after 'timeout' parameter
     #[arg(short, long)]
     all_topics: bool,
+
+    /// fps for all the cube topic
+    #[arg(long, env)]
+    cube_fps: Option<f64>,
 }
 
 async fn write_to_file(
@@ -161,6 +165,92 @@ fn stream(
                     if (unix_time_seconds - start_time) / NANO_SEC >= duration {
                         break;
                     }
+                }
+            }
+            Err(_) => {
+                warn!("Lost topic: {}", topic);
+                continue;
+            }
+        }
+    }
+
+    Ok(())
+}
+
+fn cube_stream(
+    channel_id: u16,
+    start_time: u128,
+    args: &Args,
+    tx: Sender<(MessageHeader, Vec<u8>)>,
+    subscriber_topic: Subscriber<'_, flume::Receiver<Sample>>,
+    topic: String,
+    mut exit_signal: BusReader<i32>,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let mut frame_number = 0;
+    let mut frame_duration = Duration::from_secs_f64(1.0 / 30.0);
+    if let Some(fps) = args.cube_fps {
+        frame_duration = Duration::from_secs_f64(1.0 / fps);
+    }
+    let mut last_frame_time = Instant::now();
+    loop {
+        match exit_signal.try_recv() {
+            Ok(_) => {
+                debug!(
+                    "Program stopped finishing writing MCAP for {:?}.....",
+                    topic
+                );
+                break;
+            }
+            Err(e) => match e {
+                TryRecvError::Empty => {}
+                TryRecvError::Disconnected => {
+                    debug!(
+                        "Program stopped finishing writing MCAP for {:?}.....",
+                        topic
+                    );
+                    break;
+                }
+            },
+        }
+
+        match subscriber_topic.recv_timeout(Duration::from_secs(10)) {
+            Ok(sample) => {
+                let now = Instant::now();
+                let elapsed = now.duration_since(last_frame_time);
+
+                if elapsed >= frame_duration {
+                    debug!(
+                        "Processing frame: {} | Elapsed time: {:?}",
+                        frame_number, elapsed
+                    );
+
+                    last_frame_time = now;
+
+                    let data = sample.value.payload.contiguous().to_vec();
+                    let current_time = SystemTime::now();
+                    let duration = current_time
+                        .duration_since(UNIX_EPOCH)
+                        .expect("Time went backwards");
+                    let unix_time_seconds = duration.as_nanos();
+
+                    let _ = tx.send((
+                        MessageHeader {
+                            channel_id,
+                            sequence: frame_number,
+                            log_time: unix_time_seconds as u64,
+                            publish_time: unix_time_seconds as u64,
+                        },
+                        data,
+                    ));
+                    frame_number += 1;
+
+                    if let Some(duration) = args.duration {
+                        if (unix_time_seconds - start_time) / NANO_SEC >= duration {
+                            break;
+                        }
+                    }
+                } else {
+                    continue;
                 }
             }
             Err(_) => {
@@ -391,7 +481,31 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         .declare_subscriber(topic.clone())
                         .res_sync()
                         .unwrap();
-                    stream(channel_id, start_time, &args, tx, subscriber, topic, rx).unwrap()
+                    if args.cube_fps.is_some() && topic == "rt/radar/cube" {
+                        cube_stream(
+                            channel_id,
+                            start_time,
+                            &args,
+                            tx,
+                            subscriber,
+                            topic.clone(),
+                            rx,
+                        )
+                        .unwrap();
+                        debug!("{:?}", topic);
+                    } else {
+                        stream(
+                            channel_id,
+                            start_time,
+                            &args,
+                            tx,
+                            subscriber,
+                            topic.clone(),
+                            rx,
+                        )
+                        .unwrap();
+                        debug!("I am in else {:?}", topic);
+                    }
                 }));
             }
             None => {
