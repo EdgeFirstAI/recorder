@@ -91,7 +91,7 @@ struct Args {
     #[arg(short, long)]
     all_topics: bool,
 
-    /// fps for all the cube topic
+    /// Framerate for the radar cube topic
     #[arg(long, env)]
     cube_fps: Option<f64>,
 }
@@ -492,7 +492,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                             rx,
                         )
                         .unwrap();
-                        debug!("{:?}", topic);
                     } else {
                         stream(
                             channel_id,
@@ -504,7 +503,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                             rx,
                         )
                         .unwrap();
-                        debug!("I am in else {:?}", topic);
                     }
                 }));
             }
