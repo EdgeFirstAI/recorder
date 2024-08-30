@@ -91,7 +91,8 @@ struct Args {
     #[arg(short, long)]
     all_topics: bool,
 
-    /// Framerate for the radar cube topic
+    /// Limit the frame rate of the cube topic, otherwise record at the native
+    /// rate
     #[arg(long, env)]
     cube_fps: Option<f64>,
 }
