@@ -1,19 +1,23 @@
 extern crate hostname;
-use anyhow::Result;
+extern crate signal_hook;
 
+mod args;
+mod schemas;
+
+use anyhow::Result;
+use args::Args;
 use bus::{Bus, BusReader};
 use chrono::Local;
-use clap::{Parser, ValueEnum};
+use clap::Parser;
 use log::{debug, error, info, warn};
-use mcap::{records::MessageHeader, Channel, Schema, WriteOptions, Writer};
+use mcap::{records::MessageHeader, WriteOptions, Writer};
+use signal_hook::{consts::signal::*, iterator::Signals};
 use std::{
-    borrow::Cow,
     collections::{BTreeMap, HashMap, HashSet},
     error::Error,
     fs,
-    io::BufWriter,
+    io::{BufWriter, Error as e, ErrorKind},
     path::Path,
-    str::FromStr,
     sync::{
         mpsc::{self, Receiver, Sender, TryRecvError},
         Arc,
@@ -21,84 +25,12 @@ use std::{
     time::{Instant, SystemTime, UNIX_EPOCH},
 };
 use tokio::time::{timeout, Duration};
-use zenoh::{
-    buffers::SplitBuffer,
-    config::{Config, WhatAmI},
-    prelude::{r#async::AsyncResolve, sync::SyncResolve},
-    sample::Sample,
-    subscriber::Subscriber,
-    Session,
-};
-
-extern crate signal_hook;
-use signal_hook::{consts::signal::*, iterator::Signals};
-
-use std::io::{Error as e, ErrorKind};
-
-mod schemas;
+use zenoh::{handlers::FifoChannelHandler, pubsub::Subscriber, sample::Sample, Session};
 
 pub const NANO_SEC: u128 = 1_000_000_000;
 
-#[derive(ValueEnum, Debug, Clone)]
-enum Compression {
-    None,
-    Lz4,
-    Zstd,
-}
-
-impl From<Compression> for Option<mcap::Compression> {
-    fn from(compression: Compression) -> Self {
-        match compression {
-            Compression::None => None,
-            Compression::Lz4 => Some(mcap::Compression::Lz4),
-            Compression::Zstd => Some(mcap::Compression::Zstd),
-        }
-    }
-}
-
-#[derive(Parser, Debug, Clone)]
-#[command(author, version, about, long_about = None)]
-struct Args {
-    /// zenoh connection mode
-    #[arg(short, long, default_value = "client")]
-    mode: String,
-
-    /// connect to endpoint
-    #[arg(short, long, default_value = "tcp/127.0.0.1:7447")]
-    connect: Vec<String>,
-
-    /// listen to endpoint
-    #[arg(short, long)]
-    listen: Vec<String>,
-
-    /// duration for the recording in seconds
-    #[arg(short, long, env)]
-    duration: Option<u128>,
-
-    /// topic detection timeout in seconds
-    #[arg(short, long, default_value = "30")]
-    timeout: u64,
-
-    /// mcap compression
-    #[arg(env, short = 'z', long, value_enum, default_value_t = Compression::None)]
-    compression: Compression,
-
-    /// topics
-    #[arg(env, required = false, value_delimiter = ' ')]
-    topics: Vec<String>,
-
-    /// will look for all topics and start recording after 'timeout' parameter
-    #[arg(short, long)]
-    all_topics: bool,
-
-    /// Limit the frame rate of the cube topic, otherwise record at the native
-    /// rate
-    #[arg(long, env)]
-    cube_fps: Option<f64>,
-}
-
 async fn write_to_file(
-    mut out: Writer<'_, BufWriter<fs::File>>,
+    mut out: Writer<BufWriter<fs::File>>,
     rx: Receiver<(MessageHeader, Vec<u8>)>,
 ) -> Result<(), Box<dyn Error>> {
     loop {
@@ -117,7 +49,7 @@ fn stream(
     start_time: u128,
     args: &Args,
     tx: Sender<(MessageHeader, Vec<u8>)>,
-    subscriber_topic: Subscriber<'_, flume::Receiver<Sample>>,
+    subscriber_topic: Subscriber<FifoChannelHandler<Sample>>,
     topic: String,
     mut exit_signal: BusReader<i32>,
 ) -> Result<(), Box<dyn std::error::Error>> {
@@ -144,7 +76,7 @@ fn stream(
         }
         match subscriber_topic.recv_timeout(Duration::from_secs(10)) {
             Ok(sample) => {
-                let data = sample.value.payload.contiguous().to_vec();
+                let data = sample.unwrap().payload().to_bytes().to_vec();
                 let current_time = SystemTime::now();
                 let duration = current_time
                     .duration_since(UNIX_EPOCH)
@@ -183,7 +115,7 @@ fn cube_stream(
     start_time: u128,
     args: &Args,
     tx: Sender<(MessageHeader, Vec<u8>)>,
-    subscriber_topic: Subscriber<'_, flume::Receiver<Sample>>,
+    subscriber_topic: Subscriber<FifoChannelHandler<Sample>>,
     topic: String,
     mut exit_signal: BusReader<i32>,
 ) -> Result<(), Box<dyn std::error::Error>> {
@@ -227,7 +159,7 @@ fn cube_stream(
 
                     last_frame_time = now;
 
-                    let data = sample.value.payload.contiguous().to_vec();
+                    let data = sample.unwrap().payload().to_bytes().to_vec();
                     let current_time = SystemTime::now();
                     let duration = current_time
                         .duration_since(UNIX_EPOCH)
@@ -300,7 +232,7 @@ fn get_filename() -> String {
 async fn discover_topics(args: &Args, session: &Session) -> Result<Vec<String>, Box<dyn Error>> {
     let subscriber = match timeout(
         Duration::from_secs(args.timeout),
-        session.declare_subscriber("**").res_async(),
+        session.declare_subscriber("**"),
     )
     .await?
     {
@@ -312,11 +244,15 @@ async fn discover_topics(args: &Args, session: &Session) -> Result<Vec<String>, 
     let start_time = Instant::now();
 
     while start_time.elapsed() < Duration::from_secs(args.timeout) {
-        let topic = subscriber.recv_timeout(Duration::from_secs(args.timeout))?;
-        if topics.insert(topic.key_expr.to_string()) {
+        let sample = subscriber
+            .recv_timeout(Duration::from_secs(args.timeout))
+            .unwrap()
+            .unwrap();
+        let topic = sample.key_expr().to_string();
+        if topics.insert(topic.clone()) {
             info!(
                 "Found {:?} will start recording in {:?} seconds",
-                topic.key_expr.to_string().clone(),
+                topic,
                 (Duration::from_secs(args.timeout) - start_time.elapsed()).as_secs() as i64
             );
         }
@@ -326,19 +262,11 @@ async fn discover_topics(args: &Args, session: &Session) -> Result<Vec<String>, 
     Ok(Vec::from_iter(topics))
 }
 
-#[async_std::main]
+#[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut args = Args::parse();
-    let mut config = Config::default();
     let schemas = schemas::get_all();
-
-    let mode = WhatAmI::from_str(&args.mode).unwrap();
-    config.set_mode(Some(mode)).unwrap();
-    config.connect.endpoints = args.connect.iter().map(|v| v.parse().unwrap()).collect();
-    config.listen.endpoints = args.listen.iter().map(|v| v.parse().unwrap()).collect();
-    let _ = config.scouting.multicast.set_enabled(Some(false));
-
-    let session = zenoh::open(config).res_async().await.unwrap();
+    let session = zenoh::open(args.clone()).await.unwrap();
 
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
     if args.topics.is_empty() && !args.all_topics {
@@ -368,7 +296,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .collect();
 
     let mut tasks = Vec::new();
-    let session = session.into_arc();
 
     for topic in &args.topics {
         let topic = topic.clone(); // Cloning topic if needed later
@@ -376,7 +303,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         let task = tokio::spawn(async move {
             let subscriber = match timeout(
                 Duration::from_secs(args.timeout),
-                session_arc.declare_subscriber(&topic).res_async(),
+                session_arc.declare_subscriber(&topic),
             )
             .await
             {
@@ -396,7 +323,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             };
 
             let enc = match subscriber.recv_timeout(Duration::from_secs(args.timeout)) {
-                Ok(sample) => sample.encoding.suffix().to_string(),
+                Ok(sample) => sample
+                    .unwrap()
+                    .encoding()
+                    .to_string()
+                    .split(';')
+                    .last()
+                    .unwrap()
+                    .to_string(),
                 Err(_) => {
                     warn!("Timed out waiting on topic {}", topic);
                     "Topic Unavailable".to_string()
@@ -445,12 +379,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .compression(args.compression.clone().into())
         .create(bufwriter)?;
 
-    let current_time = SystemTime::now();
-    let duration = current_time
-        .duration_since(UNIX_EPOCH)
-        .expect("Time went backwards");
-    let start_time: u128 = duration.as_nanos();
-
     let mut bus = Bus::new(1);
     let mut futures = Vec::new();
     let (tx, rx) = mpsc::channel();
@@ -458,18 +386,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     for (topic, encoding) in topics {
         match schemas.get(format!("schemas/{}.msg", encoding).as_str()) {
             Some(schema) => {
-                let schema = Schema {
-                    name: encoding.clone(),
-                    encoding: "ros2msg".to_owned(),
-                    data: Cow::from(schema.as_bytes()),
-                };
-
-                let channel_id = out.add_channel(&Channel {
-                    topic: topic.replace("rt", ""),
-                    schema: Some(Arc::new(schema)),
-                    message_encoding: String::from("cdr"),
-                    metadata: BTreeMap::default(),
-                })?;
+                let schema_id = out.add_schema(&encoding, "ros2msg", schema.as_bytes())?;
+                let channel_id = out.add_channel(
+                    schema_id,
+                    &topic.replace("rt", ""),
+                    "cdr",
+                    &BTreeMap::default(),
+                )?;
 
                 let args = args.clone();
                 let tx = tx.clone();
@@ -478,33 +401,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 let topic = topic.clone();
 
                 futures.push(std::thread::spawn(move || {
-                    let subscriber = session
-                        .declare_subscriber(topic.clone())
-                        .res_sync()
-                        .unwrap();
-                    if args.cube_fps.is_some() && topic == "rt/radar/cube" {
-                        cube_stream(
-                            channel_id,
-                            start_time,
-                            &args,
-                            tx,
-                            subscriber,
-                            topic.clone(),
-                            rx,
-                        )
-                        .unwrap();
-                    } else {
-                        stream(
-                            channel_id,
-                            start_time,
-                            &args,
-                            tx,
-                            subscriber,
-                            topic.clone(),
-                            rx,
-                        )
-                        .unwrap();
-                    }
+                    tokio::runtime::Builder::new_current_thread()
+                        .enable_all()
+                        .build()
+                        .unwrap()
+                        .block_on(launch_stream(session, args, topic, channel_id, tx, rx));
                 }));
             }
             None => {
@@ -544,4 +445,25 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     info!("Saved MCAP to {}", filename.display());
     Ok(())
+}
+
+async fn launch_stream(
+    session: Session,
+    args: Args,
+    topic: String,
+    channel_id: u16,
+    tx: Sender<(MessageHeader, Vec<u8>)>,
+    rx: BusReader<i32>,
+) {
+    let start_time = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+
+    let subscriber = session.declare_subscriber(topic.clone()).await.unwrap();
+    if args.cube_fps.is_some() && topic == "rt/radar/cube" {
+        cube_stream(channel_id, start_time, &args, tx, subscriber, topic, rx).unwrap();
+    } else {
+        stream(channel_id, start_time, &args, tx, subscriber, topic, rx).unwrap();
+    }
 }
