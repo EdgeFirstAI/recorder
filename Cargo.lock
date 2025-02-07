@@ -1404,7 +1404,6 @@ dependencies = [
  "chrono",
  "clap",
  "env_logger",
- "flume",
  "hostname",
  "include_walk",
  "log",
