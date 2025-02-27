@@ -43,8 +43,8 @@ pub struct Args {
     pub all_topics: bool,
 
     /// Limit the frame rate of the cube topic, otherwise record at the native
-    /// rate
-    #[arg(long, env)]
+    /// rate. Must be greater than 0 if specified.
+    #[arg(long, env, value_parser = validate_fps)]
     pub cube_fps: Option<f64>,
 
     /// zenoh connection mode
@@ -95,5 +95,14 @@ impl From<Args> for Config {
             .unwrap();
 
         config
+    }
+}
+
+fn validate_fps(s: &str) -> Result<f64, String> {
+    let fps: f64 = s.parse().map_err(|_| "Expected a floating point number")?;
+    if fps <= 0.0 {
+        Err("Cube FPS must be greater than 0".to_string())
+    } else {
+        Ok(fps)
     }
 }
