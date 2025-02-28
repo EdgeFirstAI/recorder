@@ -43,9 +43,9 @@ pub struct Args {
     pub all_topics: bool,
 
     /// Limit the frame rate of the cube topic, otherwise record at the native
-    /// rate. Must be greater than 0 if specified.
-    #[arg(long, env, value_parser = validate_fps)]
-    pub cube_fps: Option<f64>,
+    /// rate. Must be greater than 0 if specified. Use 'MAX' for native rate.
+    #[arg(long, env, value_parser = parse_fps)]
+    pub cube_fps: Option<u32>,
 
     /// zenoh connection mode
     #[arg(long, env, default_value = "peer")]
@@ -98,11 +98,26 @@ impl From<Args> for Config {
     }
 }
 
-fn validate_fps(s: &str) -> Result<f64, String> {
-    let fps: f64 = s.parse().map_err(|_| "Expected a floating point number")?;
-    if fps <= 0.0 {
-        Err("Cube FPS must be greater than 0".to_string())
+fn parse_fps(s: &str) -> Result<u32, String> {
+    if s.to_uppercase() == "MAX" {
+        return Ok(0);
+    }
+
+    let fps: u32 = s
+        .parse()
+        .map_err(|_| "Expected a positive integer number or 'MAX'")?;
+    if fps == 0 {
+        Err("FPS must be greater than 0".to_string())
     } else {
         Ok(fps)
+    }
+}
+
+impl Args {
+    pub fn get_cube_fps(&self) -> Option<u32> {
+        match self.cube_fps {
+            Some(0) => None,
+            other => other,
+        }
     }
 }

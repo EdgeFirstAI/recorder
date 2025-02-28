@@ -120,7 +120,8 @@ fn cube_stream(
     mut exit_signal: BusReader<i32>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let mut frame_number = 0;
-    let frame_duration = Duration::from_secs_f64(1.0 / args.cube_fps.unwrap_or(30.0));
+    let frame_duration =
+        Duration::from_secs_f64(1.0 / f64::from(args.get_cube_fps().unwrap_or(30)));
     let mut next_frame_time = Instant::now();
 
     loop {
