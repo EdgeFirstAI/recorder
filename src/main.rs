@@ -120,11 +120,10 @@ fn cube_stream(
     mut exit_signal: BusReader<i32>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let mut frame_number = 0;
-    let mut frame_duration = Duration::from_secs_f64(1.0 / 30.0);
-    if let Some(fps) = args.cube_fps {
-        frame_duration = Duration::from_secs_f64(1.0 / fps);
-    }
-    let mut last_frame_time = Instant::now();
+    let frame_duration =
+        Duration::from_secs_f64(1.0 / f64::from(args.get_cube_fps().unwrap_or(30)));
+    let mut next_frame_time = Instant::now();
+
     loop {
         match exit_signal.try_recv() {
             Ok(_) => {
@@ -149,15 +148,15 @@ fn cube_stream(
         match subscriber_topic.recv_timeout(Duration::from_secs(10)) {
             Ok(sample) => {
                 let now = Instant::now();
-                let elapsed = now.duration_since(last_frame_time);
 
-                if elapsed >= frame_duration {
+                if now >= next_frame_time {
                     debug!(
-                        "Processing frame: {} | Elapsed time: {:?}",
-                        frame_number, elapsed
+                        "Processing frame: {} | Time since last frame: {:?}",
+                        frame_number,
+                        now.duration_since(
+                            next_frame_time.checked_sub(frame_duration).unwrap_or(now)
+                        )
                     );
-
-                    last_frame_time = now;
 
                     let data = sample.unwrap().payload().to_bytes().to_vec();
                     let current_time = SystemTime::now();
@@ -177,13 +176,16 @@ fn cube_stream(
                     ));
                     frame_number += 1;
 
+                    next_frame_time += frame_duration;
+                    if next_frame_time < now {
+                        next_frame_time = now + frame_duration;
+                    }
+
                     if let Some(duration) = args.duration {
                         if (unix_time_seconds - start_time) / NANO_SEC >= duration {
                             break;
                         }
                     }
-                } else {
-                    continue;
                 }
             }
             Err(_) => {
