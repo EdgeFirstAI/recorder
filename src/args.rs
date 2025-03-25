@@ -99,6 +99,10 @@ impl From<Args> for Config {
 }
 
 fn parse_fps(s: &str) -> Result<u32, String> {
+    if s.is_empty() {
+        return Ok(0);
+    }
+
     if s.to_uppercase() == "MAX" {
         return Ok(0);
     }
