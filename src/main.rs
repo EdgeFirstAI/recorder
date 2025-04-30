@@ -330,7 +330,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     .encoding()
                     .to_string()
                     .split(';')
-                    .last()
+                    .next_back()
                     .unwrap()
                     .to_string(),
                 Err(_) => {
