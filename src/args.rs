@@ -27,7 +27,7 @@ pub struct Args {
     pub duration: Option<u128>,
 
     /// topic detection timeout in seconds
-    #[arg(short, long, default_value = "30")]
+    #[arg(short, long, default_value = "5")]
     pub timeout: u64,
 
     /// mcap compression
