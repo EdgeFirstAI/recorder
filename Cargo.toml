@@ -1,9 +1,9 @@
 [package]
-name = "maivin-recorder"
-description = "Maivin MCAP Recorder"
+name = "edgefirst-recorder"
+description = "EdgeFirst MCAP Recorder"
 authors = ["Au-Zone Technologies"]
 version = "0.0.0"
-edition = "2021"
+edition = "2024"
 
 [profile.release]
 opt-level = 3
@@ -20,7 +20,7 @@ debug = true
 anyhow = "1.0.98"
 bus = "2.4.1"
 chrono = "0.4.41"
-clap = { version = "4.5.37", features = ["derive", "env"] }
+clap = { version = "4.5.38", features = ["derive", "env"] }
 env_logger = "0.11.8"
 hostname = "0.4.1"
 log = "0.4.27"

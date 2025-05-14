@@ -10,7 +10,7 @@ use bus::{Bus, BusReader};
 use chrono::Local;
 use clap::Parser;
 use log::{debug, error, info, warn};
-use mcap::{records::MessageHeader, WriteOptions, Writer};
+use mcap::{WriteOptions, Writer, records::MessageHeader};
 use signal_hook::{consts::signal::*, iterator::Signals};
 use std::{
     collections::{BTreeMap, HashMap, HashSet},
@@ -19,13 +19,13 @@ use std::{
     io::{BufWriter, Error as e, ErrorKind},
     path::Path,
     sync::{
-        mpsc::{self, Receiver, Sender, TryRecvError},
         Arc,
+        mpsc::{self, Receiver, Sender, TryRecvError},
     },
     time::{Instant, SystemTime, UNIX_EPOCH},
 };
-use tokio::time::{timeout, Duration};
-use zenoh::{handlers::FifoChannelHandler, pubsub::Subscriber, sample::Sample, Session};
+use tokio::time::{Duration, timeout};
+use zenoh::{Session, handlers::FifoChannelHandler, pubsub::Subscriber, sample::Sample};
 
 pub const NANO_SEC: u128 = 1_000_000_000;
 

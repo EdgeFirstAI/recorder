@@ -1,51 +1,69 @@
-image: deepview/rust:1.84.0-6
+image: deepview/rust:1.86.0-4
 
 clone:
   depth: full
 
 definitions:
-  caches:
-    cargo: /usr/local/cargo
-    rust-target: $BITBUCKET_CLONE_DIR/target
   steps:
-    - step: &build
-        name: Build
-        runs-on:
-          - 'self.hosted'
-        caches:
-          - cargo
-          - rust-target
+    - step: &version
+        name: VERSION
         script:
           - |
             if [ -z "$BITBUCKET_TAG" ] ; then
-              export BRANCH=$(echo ${BITBUCKET_BRANCH} | sed 's,/,-,g')
-              export VERSION=0.0.0-${BRANCH}-${BITBUCKET_BUILD_NUMBER}
+              export VERSION=0.0.0-dev${BITBUCKET_BUILD_NUMBER}
             else
               export VERSION=${BITBUCKET_TAG}
             fi
           - sed -i "s/0.0.0/$VERSION/g" Cargo.toml
-          - cargo build --target=aarch64-unknown-linux-gnu --config target.aarch64-unknown-linux-gnu.linker=\"aarch64-linux-gnu-gcc\" --release
-          - cargo clippy --target=aarch64-unknown-linux-gnu --message-format=json > clippy.json || true
+          - echo $VERSION
+        artifacts:
+          - Cargo.toml
+    - step: &analyze
+        name: Analyze
+        size: 2x
+        script:
+          - cargo clippy --message-format=json > clippy.json || true
           - cargo audit --json > audit.json || true
           - cargo outdated --depth 1 --format json > outdated.json || true
-          - cargo sonar --clippy --audit --outdated
+          - cargo sonar --clippy --outdated --audit
         artifacts:
-          - target/aarch64-unknown-linux-gnu/release/maivin-recorder
           - sonar-issues.json
+    - step: &build-linux-x86_64
+        name: Build Linux x86_64
+        size: 2x
+        script:
+          - cargo build --release
+        artifacts:
+          - target/release/edgefirst-recorder
+    - step: &build-linux-aarch64
+        name: Build Linux aarch64
+        size: 2x
+        script:
+          - cargo build --target=aarch64-unknown-linux-gnu --release
+        artifacts:
+          - target/aarch64-unknown-linux-gnu/release/edgefirst-recorder
     - step: &sonar
         name: Code Sonar
         runs-on:
           - 'self.hosted'
-        image: sonarsource/sonar-scanner-cli:11
+        image: sonarsource/sonar-scanner-cli:11.3
         script:
           - sonar-scanner
 pipelines:
   default:
-    - step: *build
+    - step: *version
+    - parallel:
+        - step: *analyze
+        - step: *build-linux-x86_64
+        - step: *build-linux-aarch64
     - step: *sonar
   pull-requests:
     '**':
-      - step: *build
+      - step: *version
+      - parallel:
+          - step: *analyze
+          - step: *build-linux-x86_64
+          - step: *build-linux-aarch64
       - step: *sonar
       - step:
           name: Deploy
@@ -54,23 +72,26 @@ pipelines:
             - echo "Deploy Pull-Request"
   tags:
     '*.*.*':
-      - step: *build
-      - step: *sonar
+      - step: *version
+      - parallel:
+          - step: *build-linux-x86_64
+          - step: *build-linux-aarch64
       - step:
           name: Deploy to Production
           deployment: Production
           script:
-            - cp target/aarch64-unknown-linux-gnu/release/maivin-recorder maivin-recorder-$BITBUCKET_TAG
-            - pipe: atlassian/bitbucket-upload-file:0.7.3
+            - cp target/release/edgefirst-recorder edgefirst-recorder-$BITBUCKET_TAG-linux-x86_64
+            - cp target/aarch64-unknown-linux-gnu/release/edgefirst-recorder edgefirst-recorder-$BITBUCKET_TAG-linux-aarch64            
+            - pipe: atlassian/bitbucket-upload-file:0.7.4
               variables:
                 BITBUCKET_USERNAME: au-zone-ci
                 BITBUCKET_APP_PASSWORD: $BITBUCKET_PASSWORD
-                FILENAME: "maivin-recorder-$BITBUCKET_TAG"
-            - pipe: atlassian/aws-s3-deploy:1.6.1
+                FILENAME: "edgefirst-recorder-$BITBUCKET_TAG-*"
+            - pipe: atlassian/aws-s3-deploy:2.0.1
               variables:
                 AWS_ACCESS_KEY_ID: $AWS_ACCESS_KEY_ID
                 AWS_SECRET_ACCESS_KEY: $AWS_SECRET_ACCESS_KEY
                 AWS_DEFAULT_REGION: 'us-west-2'
                 S3_BUCKET: "maivin/services/recorder"
                 LOCAL_PATH: "."
-                EXTRA_ARGS: "--exclude=* --include=maivin-recorder-$BITBUCKET_TAG"
+                EXTRA_ARGS: "--exclude=* --include=edgefirst-recorder-$BITBUCKET_TAG-*"
