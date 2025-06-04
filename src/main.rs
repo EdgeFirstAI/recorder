@@ -44,7 +44,7 @@ async fn write_to_file(
     let mut last_file_size = 0u64;
     let mut growth_rate = 0f64;
     let check_interval = Duration::from_secs(5);
-    let min_buffer_seconds = 120;
+    let min_buffer_seconds = 60;
 
     loop {
         match rx.recv() {
@@ -71,7 +71,7 @@ async fn write_to_file(
                         - Last file size: {:.2} MB\n\
                         - Growth rate: {:.2} MB/s\n\
                         - Available space: {:.2} MB\n\
-                        - Estimated space needed (2min): {:.2} MB\n\
+                        - Estimated space needed (1min): {:.2} MB\n\
                         - Time difference: {:.2}s",
                         current_size as f64 / (1024.0 * 1024.0),
                         last_file_size as f64 / (1024.0 * 1024.0),
@@ -508,7 +508,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     info!("Saved MCAP to {}", filename.display());
-    Ok(())
+    std::process::exit(0);
 }
 
 async fn launch_stream(
