@@ -1,3 +1,4 @@
+extern crate fs2;
 extern crate hostname;
 extern crate signal_hook;
 
@@ -19,7 +20,7 @@ use std::{
     io::{BufWriter, Error as e, ErrorKind},
     path::Path,
     sync::{
-        Arc,
+        Arc, Mutex,
         mpsc::{self, Receiver, Sender, TryRecvError},
     },
     time::{Instant, SystemTime, UNIX_EPOCH},
@@ -29,13 +30,73 @@ use zenoh::{Session, handlers::FifoChannelHandler, pubsub::Subscriber, sample::S
 
 pub const NANO_SEC: u128 = 1_000_000_000;
 
+fn get_available_space(path: &Path) -> Result<u64, std::io::Error> {
+    fs2::available_space(path)
+}
+
 async fn write_to_file(
     mut out: Writer<BufWriter<fs::File>>,
     rx: Receiver<(MessageHeader, Vec<u8>)>,
+    file_path: &Path,
+    bus: Arc<Mutex<Bus<i32>>>,
 ) -> Result<(), Box<dyn Error>> {
+    let mut last_size_check = Instant::now();
+    let mut last_file_size = 0u64;
+    let mut growth_rate = 0f64;
+    let check_interval = Duration::from_secs(5);
+    let min_buffer_seconds = 120;
+
     loop {
         match rx.recv() {
-            Ok((header, data)) => out.write_to_known_channel(&header, &data)?,
+            Ok((header, data)) => {
+                out.write_to_known_channel(&header, &data)?;
+                if last_size_check.elapsed() >= check_interval {
+                    debug!(
+                        "Storage check - Time since last check: {:.2}s",
+                        last_size_check.elapsed().as_secs_f64()
+                    );
+                    let current_size = file_path.metadata()?.len();
+                    let time_diff = last_size_check.elapsed().as_secs_f64();
+
+                    if last_file_size > 0 {
+                        growth_rate = (current_size - last_file_size) as f64 / time_diff;
+                    }
+
+                    let available_space = get_available_space(file_path)?;
+                    let estimated_space_needed = (growth_rate * min_buffer_seconds as f64) as u64;
+
+                    debug!(
+                        "Storage stats:\n\
+                        - Current file size: {:.2} MB\n\
+                        - Last file size: {:.2} MB\n\
+                        - Growth rate: {:.2} MB/s\n\
+                        - Available space: {:.2} MB\n\
+                        - Estimated space needed (2min): {:.2} MB\n\
+                        - Time difference: {:.2}s",
+                        current_size as f64 / (1024.0 * 1024.0),
+                        last_file_size as f64 / (1024.0 * 1024.0),
+                        growth_rate / (1024.0 * 1024.0),
+                        available_space as f64 / (1024.0 * 1024.0),
+                        estimated_space_needed as f64 / (1024.0 * 1024.0),
+                        time_diff
+                    );
+
+                    if available_space < estimated_space_needed {
+                        info!(
+                            "Low storage space detected. Growth rate: {:.2} MB/s, Available: {:.2} MB, Needed: {:.2} MB. Stopping recording...",
+                            growth_rate / (1024.0 * 1024.0),
+                            available_space as f64 / (1024.0 * 1024.0),
+                            estimated_space_needed as f64 / (1024.0 * 1024.0)
+                        );
+                        out.finish()?;
+                        bus.lock().unwrap().broadcast(1);
+                        return Ok(());
+                    }
+
+                    last_file_size = current_size;
+                    last_size_check = Instant::now();
+                }
+            }
             Err(_) => {
                 out.finish()?;
                 return Ok(());
@@ -381,7 +442,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .compression(args.compression.clone().into())
         .create(bufwriter)?;
 
-    let mut bus = Bus::new(1);
+    let bus = Arc::new(Mutex::new(Bus::new(1)));
     let mut futures = Vec::new();
     let (tx, rx) = mpsc::channel();
 
@@ -399,7 +460,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 let args = args.clone();
                 let tx = tx.clone();
                 let session = session.clone();
-                let rx = bus.add_rx();
+                let rx = bus.lock().unwrap().add_rx();
                 let topic = topic.clone();
 
                 futures.push(std::thread::spawn(move || {
@@ -418,16 +479,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     let mut signals = Signals::new([SIGINT, SIGTERM]).expect("Error creating signal iterator");
+    let bus_clone = bus.clone();
     std::thread::spawn(move || {
         for signal in signals.forever() {
             match signal {
                 SIGINT => {
                     debug!("Received Ctrl+C (SIGINT) signal");
-                    bus.broadcast(1);
+                    bus_clone.lock().unwrap().broadcast(1);
                     break;
                 }
                 SIGTERM => {
-                    bus.broadcast(1);
+                    bus_clone.lock().unwrap().broadcast(1);
                     debug!("Received SIGTERM signal");
                     break;
                 }
@@ -437,7 +499,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     });
     drop(tx);
 
-    if let Err(err) = write_to_file(out, rx).await {
+    if let Err(err) = write_to_file(out, rx, &filename, bus).await {
         return Err(format!("Error writing to file: {}", err).into());
     }
 
