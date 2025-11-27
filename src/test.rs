@@ -1,3 +1,6 @@
+// Copyright 2025 Au-Zone Technologies Inc.
+// SPDX-License-Identifier: Apache-2.0
+
 pub fn read_mcap(mapped: Mmap) -> Result<()> {
     for message_result in MessageStream::new(&mapped)? {
         let message: mcap::Message<'_> = message_result?;
