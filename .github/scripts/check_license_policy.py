@@ -5,7 +5,7 @@ Validates that all dependencies comply with the Au-Zone Software Process Specifi
 
 LICENSE POLICY SOURCE:
 This script implements the license policy defined in the Au-Zone Software Process Specification.
-Last synchronized with policy version: 2.0 (2025-11-24)
+Last synchronized with policy version: 2.1 (2025-11-26)
 
 CUSTOMIZATION REQUIRED:
 - Review ALLOWED_LICENSES against your organization's policy

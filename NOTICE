@@ -1,27 +1,53 @@
-Maivin Recorder
+EdgeFirst Recorder
 Copyright 2025 Au-Zone Technologies Inc.
 
 This product includes software developed at Au-Zone Technologies Inc.
 (https://www.au-zone.com/)
 
-This software contains the following first-level dependencies:
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
 
-- anyhow 1.0.98
-- bus 2.4.1
-- chrono 0.4.41
-- clap 4.5.39 (derive, env features)
-- env_logger 0.11.8
-- fs2 0.4.3
-- hostname 0.4.1
-- log 0.4.27
-- mcap 0.18.0
-- serde_json 1.0.140
-- signal-hook 0.3.18
-- tokio 1.45.1 (rt-multi-thread, time, io-std features)
-- zenoh 1.4.0
+    http://www.apache.org/licenses/LICENSE-2.0
 
-Build dependencies:
-- include_walk 0.3.2
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
 
-For complete dependency information and transitive dependencies,
-see the SBOM file: sbom.json
+================================================================================
+THIRD-PARTY DEPENDENCIES
+================================================================================
+
+This software includes the following third-party dependencies with their
+respective licenses. All dependencies are statically linked Rust crates.
+
+First-Level Dependencies:
+  * anyhow 1.0.98 (MIT OR Apache-2.0)
+  * bus 2.4.1 (MIT OR Apache-2.0)
+  * chrono 0.4.41 (MIT OR Apache-2.0)
+  * clap 4.5.39 (MIT OR Apache-2.0)
+  * env_logger 0.11.8 (MIT OR Apache-2.0)
+  * fs2 0.4.3 (MIT OR Apache-2.0)
+  * hostname 0.4.1 (MIT)
+  * log 0.4.27 (MIT OR Apache-2.0)
+  * mcap 0.18.0 (MIT)
+  * serde_json 1.0.140 (MIT OR Apache-2.0)
+  * signal-hook 0.3.18 (MIT OR Apache-2.0)
+  * tokio 1.45.1 (MIT)
+  * zenoh 1.4.0 (EPL-2.0 OR Apache-2.0)
+
+Build Dependencies:
+  * include_walk 0.3.2 (MIT OR Apache-2.0)
+
+For complete dependency information including transitive dependencies,
+see the Software Bill of Materials (SBOM) file: sbom.json
+
+================================================================================
+LICENSE TEXTS
+================================================================================
+
+The full text of the Apache License 2.0 is included in the LICENSE file.
+The MIT license text is available at: https://opensource.org/licenses/MIT
+The EPL-2.0 license text is available at: https://www.eclipse.org/legal/epl-2.0/

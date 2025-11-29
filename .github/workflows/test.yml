@@ -1,13 +1,15 @@
 # GitHub Actions workflow for testing and code quality
 #
 # This workflow runs tests, performs static analysis, and collects coverage data
-# for the EdgeFirst Fusion project.
+# for the EdgeFirst Recorder project.
 #
-# Action Versions (verified November 2025):
-# - actions/checkout@v4 (latest)
-# - dtolnay/rust-toolchain@stable (latest)
-# - actions/upload-artifact@v4 (latest)
-# - codecov/codecov-action@v3 (latest)
+# Action Versions (hash-pinned per SPS v2.1):
+# - actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 (v4.2.2)
+# - dtolnay/rust-toolchain@7b1c307e0dcbda6122208f10795a713336a9b35a (stable)
+# - actions/cache@6849a6489940f00c2f30c0fb92c6274307ccb58a (v4.1.2)
+# - actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882 (v4.4.3)
+# - taiki-e/install-action@735e5933943122c5ac182670a935f54a949265c1 (v2.44.13)
+# - SonarSource/sonarqube-scan-action@e44258b109568baa0df60ed515909fc6c72cba92 (v6)
 
 name: Test
 
@@ -20,6 +22,8 @@ on:
 
 env:
   CARGO_TERM_COLOR: always
+  CARGO_HOME: /home/runner/.cargo
+  CARGO_INCREMENTAL: 0
 
 jobs:
   format:
@@ -28,12 +32,15 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # v4.2.2
 
       - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@7b1c307e0dcbda6122208f10795a713336a9b35a  # stable
         with:
           components: rustfmt
+
+      - name: Generate schemas.rs (required by build.rs)
+        run: cargo check --lib
 
       - name: Check formatting
         run: cargo fmt --all --check
@@ -44,22 +51,22 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # v4.2.2
 
       - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@7b1c307e0dcbda6122208f10795a713336a9b35a  # stable
         with:
           components: clippy
 
       - name: Cache cargo registry
-        uses: actions/cache@v4
+        uses: actions/cache@6849a6489940f00c2f30c0fb92c6274307ccb58a  # v4.1.2
         with:
           path: ~/.cargo/registry/index
           key: ${{ runner.os }}-cargo-index-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: ${{ runner.os }}-cargo-index-
 
       - name: Cache cargo build
-        uses: actions/cache@v4
+        uses: actions/cache@6849a6489940f00c2f30c0fb92c6274307ccb58a  # v4.1.2
         with:
           path: target
           key: ${{ runner.os }}-cargo-clippy-${{ hashFiles('**/Cargo.lock') }}
@@ -82,33 +89,35 @@ jobs:
             runner: ubuntu-22.04
             target: x86_64-unknown-linux-gnu
           - name: aarch64
-            runner: ubuntu-22.04-arm-private
+            runner: ubuntu-22.04-arm
             target: aarch64-unknown-linux-gnu
       fail-fast: false
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # v4.2.2
         with:
           fetch-depth: 0  # Full history for better analysis
 
       - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@7b1c307e0dcbda6122208f10795a713336a9b35a  # stable
         with:
           components: llvm-tools-preview
 
       - name: Install cargo-llvm-cov
-        uses: taiki-e/install-action@cargo-llvm-cov
+        uses: taiki-e/install-action@735e5933943122c5ac182670a935f54a949265c1  # v2.44.13
+        with:
+          tool: cargo-llvm-cov
 
       - name: Cache cargo registry
-        uses: actions/cache@v4
+        uses: actions/cache@6849a6489940f00c2f30c0fb92c6274307ccb58a  # v4.1.2
         with:
           path: ~/.cargo/registry/index
           key: ${{ runner.os }}-cargo-index-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: ${{ runner.os }}-cargo-index-
 
       - name: Cache cargo build
-        uses: actions/cache@v4
+        uses: actions/cache@6849a6489940f00c2f30c0fb92c6274307ccb58a  # v4.1.2
         with:
           path: target
           key: ${{ runner.os }}-cargo-test-${{ hashFiles('**/Cargo.lock') }}
@@ -130,15 +139,8 @@ jobs:
           cargo llvm-cov --lib --workspace --cobertura --output-path coverage.xml
           cargo llvm-cov --doc --workspace --cobertura --output-path coverage-doc.xml || true
 
-      - name: Upload coverage to Codecov
-        uses: codecov/codecov-action@v3
-        with:
-          files: coverage.xml
-          flags: ${{ matrix.platform.name }}
-          fail_ci_if_error: false
-
       - name: Upload test results
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882  # v4.4.3
         if: always()
         with:
           name: test-results-${{ matrix.platform.name }}
@@ -149,33 +151,31 @@ jobs:
   sonarcloud:
     name: SonarCloud Analysis
     runs-on: ubuntu-22.04
+    needs: [format, clippy, test]
     if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # v4.2.2
         with:
           fetch-depth: 0  # Shallow clones should be disabled for better analysis
 
       - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@7b1c307e0dcbda6122208f10795a713336a9b35a  # stable
         with:
           components: llvm-tools-preview
 
       - name: Install cargo-llvm-cov
-        uses: taiki-e/install-action@cargo-llvm-cov
+        uses: taiki-e/install-action@735e5933943122c5ac182670a935f54a949265c1  # v2.44.13
+        with:
+          tool: cargo-llvm-cov
 
       - name: Generate coverage for SonarCloud
         run: |
           cargo llvm-cov --lib --workspace --cobertura --output-path target/rust-coverage.xml || true
 
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.10'
-
       - name: SonarCloud Scan
-        uses: SonarSource/sonarcloud-github-action@master
+        uses: SonarSource/sonarqube-scan-action@e44258b109568baa0df60ed515909fc6c72cba92  # v6
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}

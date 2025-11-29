@@ -7,11 +7,14 @@
 # - .github/scripts/generate_sbom.sh
 # - .github/scripts/check_license_policy.py
 # - .github/scripts/validate_notice.py
+# - NOTICE file in repository root
 #
-# Action Versions (verified November 2025):
-# - actions/checkout@v4 (latest)
-# - actions/setup-python@v5 (latest)
-# - actions/upload-artifact@v4 (latest)
+# Action Versions (hash-pinned per SPS v2.1):
+# - actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 (v4.2.2)
+# - actions/setup-python@0b93645e9fea7318ecaed2b359559ac225c90a2b (v5.3.0)
+# - dtolnay/rust-toolchain@7b1c307e0dcbda6122208f10795a713336a9b35a (stable)
+# - actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882 (v4.4.3)
+# - softprops/action-gh-release@c062e08bd532815e2082a85e87e3ef29c3e6d191 (v2.0.8)
 
 name: SBOM
 
@@ -31,23 +34,17 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Install system dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y nasm
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # v4.2.2
 
       - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@7b1c307e0dcbda6122208f10795a713336a9b35a  # stable
 
       - name: Install cargo tools
         run: |
           cargo install cargo-cyclonedx --version 0.5.7
-          cargo install cargo-license --version 0.7.0
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@0b93645e9fea7318ecaed2b359559ac225c90a2b  # v5.3.0
         with:
           python-version: '3.11'
 
@@ -55,7 +52,7 @@ jobs:
         run: |
           python3 -m venv venv
           venv/bin/pip install --upgrade pip
-          venv/bin/pip install scancode-toolkit cyclonedx-bom
+          venv/bin/pip install scancode-toolkit
 
       - name: Install CycloneDX CLI
         run: |
@@ -78,15 +75,29 @@ jobs:
         run: python3 .github/scripts/validate_notice.py NOTICE sbom.json
 
       - name: Upload SBOM Artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882  # v4.4.3
         with:
           name: sbom
           path: sbom.json
           retention-days: 90
 
-      - name: Fail on License Violations
-        if: failure()
+      - name: Release SBOM
+        uses: softprops/action-gh-release@c062e08bd532815e2082a85e87e3ef29c3e6d191  # v2.0.8
+        if: startsWith(github.ref, 'refs/tags/')
+        with:
+          files: |
+            sbom.json
+
+      - name: Generate SBOM Summary
         run: |
-          echo "❌ SBOM generation or license policy check failed!"
-          echo "Review the output above for details."
-          exit 1
+          echo "## SBOM Generation Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "✅ SBOM generated successfully" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          COMPONENT_COUNT=$(python3 -c "import json; sbom = json.load(open('sbom.json')); print(len(sbom.get('components', [])))")
+          echo "📦 **Total Components**: $COMPONENT_COUNT" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          echo "### Files Generated" >> $GITHUB_STEP_SUMMARY
+          echo "- \`sbom.json\` - CycloneDX 1.6 format SBOM" >> $GITHUB_STEP_SUMMARY

@@ -5,7 +5,7 @@ Ensures NOTICE file lists all first-level dependencies requiring attribution
 
 LICENSE POLICY SOURCE:
 This script implements NOTICE file validation per the Au-Zone Software Process Specification.
-Last synchronized with policy version: 2.0 (2025-11-24)
+Last synchronized with policy version: 2.1 (2025-11-26)
 
 IMPORTANT: The NOTICE file is manually curated by developers and describes:
   1. First-level dependencies requiring attribution (MIT, Apache-2.0, BSD, etc.)
