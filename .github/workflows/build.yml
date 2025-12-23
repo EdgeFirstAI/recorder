@@ -4,8 +4,8 @@
 # documentation for the EdgeFirst Recorder project.
 #
 # Build Strategy:
-# - x86_64: Built natively in manylinux2014_x86_64 container for glibc 2.17 compatibility
-# - aarch64: Built natively in manylinux2014_aarch64 container on private ARM runner
+# - Uses cargo-zigbuild for manylinux2014 (glibc 2.17) compatibility
+# - Cross-compiles aarch64 from x86_64 runner
 #
 # Action Versions (hash-pinned per SPS v2.1):
 # - actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 (v4)
@@ -25,7 +25,6 @@ on:
 
 env:
   CARGO_TERM_COLOR: always
-  CARGO_INCREMENTAL: 0
 
 jobs:
   documentation:
@@ -60,19 +59,13 @@ jobs:
 
   build-packages:
     name: Build Packages (${{ matrix.platform.name }})
-    runs-on: ${{ matrix.platform.runner }}
-    container:
-      image: ${{ matrix.platform.container }}
+    runs-on: ubuntu-22.04
     strategy:
       matrix:
         platform:
           - name: x86_64
-            runner: ubuntu-22.04
-            container: quay.io/pypa/manylinux2014_x86_64
             target: x86_64-unknown-linux-gnu
           - name: aarch64
-            runner: ubuntu-22.04-arm-private
-            container: quay.io/pypa/manylinux2014_aarch64
             target: aarch64-unknown-linux-gnu
       fail-fast: false
 
@@ -81,37 +74,44 @@ jobs:
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4
 
       - name: Install Rust
+        uses: dtolnay/rust-toolchain@f7ccc83f9ed1e5b9c81d8a67d7ad1a747e22a561  # master
+        with:
+          toolchain: stable
+          targets: ${{ matrix.platform.target }}
+
+      - name: Install zig and cargo-zigbuild
         run: |
-          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable
-          echo "$HOME/.cargo/bin" >> $GITHUB_PATH
+          pip install ziglang
+          cargo install cargo-zigbuild
+
+      - name: Install cross-compilation tools (ARM64)
+        if: matrix.platform.target == 'aarch64-unknown-linux-gnu'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-aarch64-linux-gnu g++-aarch64-linux-gnu
 
       - name: Cache cargo registry
         uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830  # v4
         with:
           path: ~/.cargo/registry/index
-          key: manylinux2014-${{ matrix.platform.name }}-cargo-index-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: manylinux2014-${{ matrix.platform.name }}-cargo-index-
+          key: ${{ runner.os }}-cargo-index-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-cargo-index-
 
       - name: Cache cargo build
         uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830  # v4
         with:
           path: target
-          key: manylinux2014-${{ matrix.platform.name }}-cargo-build-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: manylinux2014-${{ matrix.platform.name }}-cargo-build-
+          key: ${{ runner.os }}-${{ matrix.platform.target }}-cargo-build-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-${{ matrix.platform.target }}-cargo-build-
 
-      - name: Build release binary
-        run: |
-          source $HOME/.cargo/env
-          cargo build --release --target ${{ matrix.platform.target }}
-
-      - name: Strip binary
-        run: strip target/${{ matrix.platform.target }}/release/edgefirst-recorder
+      - name: Build release binary with cargo-zigbuild (manylinux2014)
+        run: cargo zigbuild --release --locked --target ${{ matrix.platform.target }}.2.17
 
       - name: Verify manylinux2014 compatibility
         run: |
           echo "Checking binary dependencies..."
-          objdump -T target/${{ matrix.platform.target }}/release/edgefirst-recorder | grep GLIBC | sort -u || true
-          echo "Binary built successfully on manylinux2014 (glibc 2.17)"
+          file target/${{ matrix.platform.target }}/release/edgefirst-recorder
+          # Note: objdump may not work for cross-compiled binaries on x86_64 host
 
       - name: Create package
         run: |
