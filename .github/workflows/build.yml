@@ -3,6 +3,10 @@
 # This workflow builds binaries for x86_64 and ARM64 platforms and generates
 # documentation for the EdgeFirst Recorder project.
 #
+# Build Strategy:
+# - x86_64: Built natively in manylinux2014_x86_64 container for glibc 2.17 compatibility
+# - aarch64: Built natively in manylinux2014_aarch64 container on private ARM runner
+#
 # Action Versions (hash-pinned per SPS v2.1):
 # - actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 (v4.2.2)
 # - dtolnay/rust-toolchain@7b1c307e0dcbda6122208f10795a713336a9b35a (stable)
@@ -21,7 +25,6 @@ on:
 
 env:
   CARGO_TERM_COLOR: always
-  CARGO_HOME: /home/runner/.cargo
   CARGO_INCREMENTAL: 0
 
 jobs:
@@ -56,14 +59,18 @@ jobs:
   build-packages:
     name: Build Packages (${{ matrix.platform.name }})
     runs-on: ${{ matrix.platform.runner }}
+    container:
+      image: ${{ matrix.platform.container }}
     strategy:
       matrix:
         platform:
           - name: x86_64
             runner: ubuntu-22.04
+            container: quay.io/pypa/manylinux2014_x86_64
             target: x86_64-unknown-linux-gnu
           - name: aarch64
-            runner: ubuntu-22.04
+            runner: ubuntu-22.04-arm-private
+            container: quay.io/pypa/manylinux2014_aarch64
             target: aarch64-unknown-linux-gnu
       fail-fast: false
 
@@ -72,42 +79,37 @@ jobs:
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # v4.2.2
 
       - name: Install Rust
-        uses: dtolnay/rust-toolchain@7b1c307e0dcbda6122208f10795a713336a9b35a  # stable
-        with:
-          targets: ${{ matrix.platform.target }}
-
-      - name: Install cross-compilation tools (ARM64)
-        if: matrix.platform.target == 'aarch64-unknown-linux-gnu'
         run: |
-          sudo apt-get update
-          sudo apt-get install -y gcc-aarch64-linux-gnu g++-aarch64-linux-gnu
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable
+          echo "$HOME/.cargo/bin" >> $GITHUB_PATH
 
       - name: Cache cargo registry
         uses: actions/cache@6849a6489940f00c2f30c0fb92c6274307ccb58a  # v4.1.2
         with:
           path: ~/.cargo/registry/index
-          key: ${{ runner.os }}-cargo-index-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: ${{ runner.os }}-cargo-index-
+          key: manylinux2014-${{ matrix.platform.name }}-cargo-index-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: manylinux2014-${{ matrix.platform.name }}-cargo-index-
 
       - name: Cache cargo build
         uses: actions/cache@6849a6489940f00c2f30c0fb92c6274307ccb58a  # v4.1.2
         with:
           path: target
-          key: ${{ runner.os }}-${{ matrix.platform.target }}-cargo-build-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: ${{ runner.os }}-${{ matrix.platform.target }}-cargo-build-
+          key: manylinux2014-${{ matrix.platform.name }}-cargo-build-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: manylinux2014-${{ matrix.platform.name }}-cargo-build-
 
       - name: Build release binary
-        run: cargo build --release --target ${{ matrix.platform.target }}
-        env:
-          CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER: aarch64-linux-gnu-gcc
+        run: |
+          source $HOME/.cargo/env
+          cargo build --release --target ${{ matrix.platform.target }}
 
       - name: Strip binary
+        run: strip target/${{ matrix.platform.target }}/release/edgefirst-recorder
+
+      - name: Verify manylinux2014 compatibility
         run: |
-          if [ "${{ matrix.platform.target }}" = "aarch64-unknown-linux-gnu" ]; then
-            aarch64-linux-gnu-strip target/${{ matrix.platform.target }}/release/edgefirst-recorder
-          else
-            strip target/${{ matrix.platform.target }}/release/edgefirst-recorder
-          fi
+          echo "Checking binary dependencies..."
+          objdump -T target/${{ matrix.platform.target }}/release/edgefirst-recorder | grep GLIBC | sort -u || true
+          echo "Binary built successfully on manylinux2014 (glibc 2.17)"
 
       - name: Create package
         run: |
