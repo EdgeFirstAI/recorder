@@ -41,9 +41,6 @@ jobs:
           toolchain: stable
           components: rustfmt
 
-      - name: Generate schemas.rs (required by build.rs)
-        run: cargo check
-
       - name: Check formatting
         run: cargo fmt --all --check
 
