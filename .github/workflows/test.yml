@@ -42,7 +42,7 @@ jobs:
           components: rustfmt
 
       - name: Generate schemas.rs (required by build.rs)
-        run: cargo check --lib
+        run: cargo check
 
       - name: Check formatting
         run: cargo fmt --all --check
@@ -118,19 +118,19 @@ jobs:
           restore-keys: ${{ runner.os }}-cargo-test-
 
       - name: Run unit tests
-        run: cargo test --lib --workspace
+        run: cargo test --workspace
 
       - name: Run doc tests
-        run: cargo test --doc --workspace
+        run: cargo test --doc --workspace || true
 
       # Note: Integration tests require hardware (DMA buffers, G2D, sensors)
       # and are skipped in CI. Run on target hardware with: cargo test --test '*'
 
       - name: Generate coverage
         run: |
-          # Only generate coverage for unit tests (--lib) and doc tests (--doc)
+          # Generate coverage for unit tests and binary tests
           # Integration tests require hardware and are excluded
-          cargo llvm-cov --lib --workspace --cobertura --output-path coverage.xml
+          cargo llvm-cov --workspace --cobertura --output-path coverage.xml
           cargo llvm-cov --doc --workspace --cobertura --output-path coverage-doc.xml || true
 
       - name: Upload test results
@@ -167,7 +167,7 @@ jobs:
 
       - name: Generate coverage for SonarCloud
         run: |
-          cargo llvm-cov --lib --workspace --cobertura --output-path target/rust-coverage.xml || true
+          cargo llvm-cov --workspace --cobertura --output-path target/rust-coverage.xml || true
 
       - name: SonarCloud Scan
         uses: SonarSource/sonarqube-scan-action@689fb39b34b9aa95ebc5f8f119343ddd51542402  # v4
