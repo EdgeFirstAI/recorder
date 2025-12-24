@@ -14,22 +14,22 @@ use bus::{Bus, BusReader};
 use chrono::Local;
 use clap::Parser;
 use log::{debug, error, info, warn};
-use mcap::{WriteOptions, Writer, records::MessageHeader};
+use mcap::{records::MessageHeader, WriteOptions, Writer};
 use signal_hook::{consts::signal::*, iterator::Signals};
 use std::{
     collections::{BTreeMap, HashMap, HashSet},
     error::Error,
     fs,
-    io::{BufWriter, Error as e, ErrorKind},
+    io::{BufWriter, Error as e},
     path::Path,
     sync::{
-        Arc, Mutex,
         mpsc::{self, Receiver, Sender, TryRecvError},
+        Arc, Mutex,
     },
     time::{Instant, SystemTime, UNIX_EPOCH},
 };
-use tokio::time::{Duration, timeout};
-use zenoh::{Session, handlers::FifoChannelHandler, pubsub::Subscriber, sample::Sample};
+use tokio::time::{timeout, Duration};
+use zenoh::{handlers::FifoChannelHandler, pubsub::Subscriber, sample::Sample, Session};
 
 pub const NANO_SEC: u128 = 1_000_000_000;
 
@@ -375,16 +375,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             {
                 Ok(Ok(subscriber)) => subscriber,
                 Ok(Err(err)) => {
-                    return Err(e::new(
-                        ErrorKind::Other,
-                        format!("failed to declare subscriber: {}", err),
-                    ));
+                    return Err(e::other(format!("failed to declare subscriber: {}", err)));
                 }
                 Err(_) => {
-                    return Err(e::new(
-                        ErrorKind::Other,
-                        "timeout while declaring subscriber",
-                    ));
+                    return Err(e::other("timeout while declaring subscriber"));
                 }
             };
 
