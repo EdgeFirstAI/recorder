@@ -225,6 +225,7 @@ $CYCLONEDX merge \
 
 # Remove duplicate project component from components list
 # AND restore bom-ref to metadata.component (cyclonedx merge strips it)
+# AND fix tools format for CycloneDX 1.6 compliance
 python3 << EOF
 import json
 import sys
@@ -249,6 +250,15 @@ if 'dependencies' in sbom and sbom['dependencies']:
     if first_dep_ref and 'metadata' in sbom and 'component' in sbom['metadata']:
         sbom['metadata']['component']['bom-ref'] = first_dep_ref
         print(f"Restored bom-ref to metadata.component: {first_dep_ref}", file=sys.stderr)
+
+# Fix tools format for CycloneDX 1.6 compliance
+# cargo-cyclonedx generates tools as an array, but CycloneDX 1.6 requires object format
+if 'metadata' in sbom and 'tools' in sbom['metadata']:
+    tools = sbom['metadata']['tools']
+    if isinstance(tools, list):
+        # Convert array format to object format with components
+        sbom['metadata']['tools'] = {'components': tools}
+        print("Fixed tools format for CycloneDX 1.6 compliance", file=sys.stderr)
 
 with open('sbom.json', 'w') as f:
     json.dump(sbom, f, indent=2)
