@@ -79,6 +79,7 @@ jobs:
     name: Run Tests
     needs: prepare-release
     uses: ./.github/workflows/test.yml
+    secrets: inherit
 
   create-github-release:
     name: Create GitHub Release
