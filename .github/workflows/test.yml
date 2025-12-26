@@ -170,10 +170,13 @@ jobs:
 
       - name: Generate coverage for SonarCloud
         run: |
-          cargo llvm-cov --workspace --cobertura --output-path target/rust-coverage.xml || true
+          cargo llvm-cov --workspace --lcov --output-path target/rust-coverage.lcov || true
 
       - name: SonarCloud Scan
-        uses: SonarSource/sonarqube-scan-action@689fb39b34b9aa95ebc5f8f119343ddd51542402  # v4
+        uses: SonarSource/sonarcloud-github-action@e44258b109568baa0df60ed515909fc6c72cba92  # v3.1.0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+        with:
+          args: >
+            -Dsonar.rust.lcov.reportPaths=target/rust-coverage.lcov
