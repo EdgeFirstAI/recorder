@@ -24,19 +24,19 @@ This software includes the following third-party dependencies with their
 respective licenses. All dependencies are statically linked Rust crates.
 
 First-Level Dependencies:
-  * anyhow 1.0.98 (MIT OR Apache-2.0)
+  * anyhow 1.0.101 (MIT OR Apache-2.0)
   * bus 2.4.1 (MIT OR Apache-2.0)
-  * chrono 0.4.41 (MIT OR Apache-2.0)
-  * clap 4.5.39 (MIT OR Apache-2.0)
-  * env_logger 0.11.8 (MIT OR Apache-2.0)
-  * fs2 0.4.3 (MIT OR Apache-2.0)
-  * hostname 0.4.1 (MIT)
-  * log 0.4.27 (MIT OR Apache-2.0)
+  * chrono 0.4.43 (MIT OR Apache-2.0)
+  * clap 4.5.58 (MIT OR Apache-2.0)
+  * env_logger 0.11.9 (MIT OR Apache-2.0)
+  * fs2 0.4.3 (MIT/Apache-2.0)
+  * hostname 0.4.2 (MIT)
+  * log 0.4.29 (MIT OR Apache-2.0)
   * mcap 0.18.0 (MIT)
-  * serde_json 1.0.140 (MIT OR Apache-2.0)
-  * signal-hook 0.3.18 (MIT OR Apache-2.0)
-  * tokio 1.45.1 (MIT)
-  * zenoh 1.4.0 (EPL-2.0 OR Apache-2.0)
+  * serde_json 1.0.149 (MIT OR Apache-2.0)
+  * signal-hook 0.3.18 (Apache-2.0/MIT)
+  * tokio 1.49.0 (MIT)
+  * zenoh 1.7.2 (EPL-2.0 OR Apache-2.0)
 
 Build Dependencies:
   * include_walk 0.3.2 (MIT OR Apache-2.0)

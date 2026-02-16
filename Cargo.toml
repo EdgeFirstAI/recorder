@@ -4,7 +4,7 @@ description = "EdgeFirst MCAP Recorder"
 authors = ["Au-Zone Technologies"]
 repository = "https://github.com/EdgeFirstAI/recorder"
 license = "Apache-2.0"
-version = "1.6.0"
+version = "1.6.1"
 edition = "2021"
 
 [profile.release]

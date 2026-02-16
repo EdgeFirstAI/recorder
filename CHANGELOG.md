@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.6.1] - 2026-02-16
+
+### Fixed
+
+- Replaced incorrect DeepView VisionPack Trial EULA with Apache License 2.0 text in LICENSE file
+- Added missing SPDX license headers to build.rs and src/schemas.rs
+
 ## [1.6.0] - 2026-02-16
 
 ### Changed
