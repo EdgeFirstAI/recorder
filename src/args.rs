@@ -25,44 +25,43 @@ impl From<Compression> for Option<mcap::Compression> {
 #[derive(Parser, Debug, Clone)]
 #[command(author, version, about, long_about = None)]
 pub struct Args {
-    /// duration for the recording in seconds
+    /// Duration for the recording in seconds
     #[arg(short, long, env)]
-    pub duration: Option<u128>,
+    pub duration: Option<u64>,
 
-    /// topic detection timeout in seconds
+    /// Topic detection timeout in seconds
     #[arg(short, long, default_value = "5")]
     pub timeout: u64,
 
-    /// mcap compression
+    /// MCAP compression algorithm
     #[arg(env, short = 'z', long, value_enum, default_value_t = Compression::None)]
     pub compression: Compression,
 
-    /// topics
+    /// Topics to record (space-delimited)
     #[arg(env, required = false, value_delimiter = ' ')]
     pub topics: Vec<String>,
 
-    /// will look for all topics and start recording after 'timeout' parameter
+    /// Discover and record all available topics
     #[arg(short, long)]
     pub all_topics: bool,
 
-    /// Limit the frame rate of the cube topic, otherwise record at the native
-    /// rate. Must be greater than 0 if specified. Use 'MAX' for native rate.
+    /// Limit the frame rate of the radar cube topic. Use 'MAX' for native rate.
     #[arg(long, env, value_parser = parse_fps)]
     pub cube_fps: Option<u32>,
 
-    /// zenoh connection mode
+    /// Zenoh connection mode
     #[arg(long, env, default_value = "peer")]
     pub mode: WhatAmI,
 
-    /// connect to zenoh endpoints
+    /// Zenoh endpoints to connect to
     #[arg(long, env)]
     pub connect: Vec<String>,
 
-    /// listen to zenoh endpoints
+    /// Zenoh endpoints to listen on
     #[arg(long, env)]
     pub listen: Vec<String>,
 
-    /// disable zenoh multicast scouting
+    /// Disable Zenoh multicast scouting
     #[arg(long, env)]
     pub no_multicast_scouting: bool,
 }
@@ -102,17 +101,14 @@ impl From<Args> for Config {
 }
 
 fn parse_fps(s: &str) -> Result<u32, String> {
-    if s.is_empty() {
-        return Ok(0);
-    }
-
-    if s.to_uppercase() == "MAX" {
+    if s.is_empty() || s.eq_ignore_ascii_case("MAX") {
         return Ok(0);
     }
 
     let fps: u32 = s
         .parse()
-        .map_err(|_| "Expected a positive integer number or 'MAX'")?;
+        .map_err(|_| "expected a positive integer or 'MAX'")?;
+
     if fps == 0 {
         Err("FPS must be greater than 0".to_string())
     } else {
@@ -121,10 +117,57 @@ fn parse_fps(s: &str) -> Result<u32, String> {
 }
 
 impl Args {
-    pub fn get_cube_fps(&self) -> Option<u32> {
+    pub fn cube_fps(&self) -> Option<u32> {
         match self.cube_fps {
             Some(0) => None,
             other => other,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_fps_max() {
+        assert_eq!(parse_fps("MAX").unwrap(), 0);
+        assert_eq!(parse_fps("max").unwrap(), 0);
+        assert_eq!(parse_fps("Max").unwrap(), 0);
+    }
+
+    #[test]
+    fn parse_fps_valid() {
+        assert_eq!(parse_fps("10").unwrap(), 10);
+        assert_eq!(parse_fps("1").unwrap(), 1);
+        assert_eq!(parse_fps("30").unwrap(), 30);
+    }
+
+    #[test]
+    fn parse_fps_zero_rejected() {
+        assert!(parse_fps("0").is_err());
+    }
+
+    #[test]
+    fn parse_fps_invalid() {
+        assert!(parse_fps("abc").is_err());
+        assert!(parse_fps("-1").is_err());
+    }
+
+    #[test]
+    fn parse_fps_empty() {
+        assert_eq!(parse_fps("").unwrap(), 0);
+    }
+
+    #[test]
+    fn cube_fps_zero_is_none() {
+        let args = Args::parse_from(["test", "--cube-fps", "MAX", "--all-topics"]);
+        assert_eq!(args.cube_fps(), None);
+    }
+
+    #[test]
+    fn cube_fps_value() {
+        let args = Args::parse_from(["test", "--cube-fps", "10", "--all-topics"]);
+        assert_eq!(args.cube_fps(), Some(10));
     }
 }

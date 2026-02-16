@@ -1,14 +1,10 @@
 // Copyright 2025 Au-Zone Technologies Inc.
 // SPDX-License-Identifier: Apache-2.0
 
-extern crate fs2;
-extern crate hostname;
-extern crate signal_hook;
-
 mod args;
 mod schemas;
 
-use anyhow::Result;
+use anyhow::{anyhow, bail, Context, Result};
 use args::Args;
 use bus::{Bus, BusReader};
 use chrono::Local;
@@ -18,31 +14,49 @@ use mcap::{records::MessageHeader, WriteOptions, Writer};
 use signal_hook::{consts::signal::*, iterator::Signals};
 use std::{
     collections::{BTreeMap, HashMap, HashSet},
-    error::Error,
     fs,
-    io::{BufWriter, Error as e},
+    io::BufWriter,
     path::Path,
     sync::{
-        mpsc::{self, Receiver, Sender, TryRecvError},
+        mpsc::{self, Receiver, SyncSender, TryRecvError},
         Arc, Mutex,
     },
-    time::{Instant, SystemTime, UNIX_EPOCH},
+    time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
-use tokio::time::{timeout, Duration};
+use tokio::time::{timeout, Duration as TokioDuration};
 use zenoh::{handlers::FifoChannelHandler, pubsub::Subscriber, sample::Sample, Session};
 
-pub const NANO_SEC: u128 = 1_000_000_000;
+const NANOS_PER_SEC: u64 = 1_000_000_000;
 
-fn get_available_space(path: &Path) -> Result<u64, std::io::Error> {
-    fs2::available_space(path)
+/// Maximum number of messages buffered between stream threads and the writer.
+const CHANNEL_CAPACITY: usize = 64;
+
+fn timestamp_nanos() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .expect("system clock before UNIX epoch")
+        .as_nanos() as u64
 }
 
-async fn write_to_file(
+fn should_exit(exit_signal: &mut BusReader<i32>) -> bool {
+    match exit_signal.try_recv() {
+        Ok(_) | Err(TryRecvError::Disconnected) => true,
+        Err(TryRecvError::Empty) => false,
+    }
+}
+
+fn get_available_space(path: &Path) -> Result<u64> {
+    fs2::available_space(path).context("failed to query available disk space")
+}
+
+/// Receives messages from all stream threads and writes them to the MCAP file.
+/// Monitors disk space and triggers shutdown if storage runs low.
+fn write_to_file(
     mut out: Writer<BufWriter<fs::File>>,
     rx: Receiver<(MessageHeader, Vec<u8>)>,
     file_path: &Path,
     bus: Arc<Mutex<Bus<i32>>>,
-) -> Result<(), Box<dyn Error>> {
+) -> Result<()> {
     let mut last_size_check = Instant::now();
     let mut last_file_size = 0u64;
     let mut growth_rate = 0f64;
@@ -52,46 +66,38 @@ async fn write_to_file(
     loop {
         match rx.recv() {
             Ok((header, data)) => {
-                out.write_to_known_channel(&header, &data)?;
+                out.write_to_known_channel(&header, &data)
+                    .context("failed to write message to MCAP")?;
+
                 if last_size_check.elapsed() >= check_interval {
-                    debug!(
-                        "Storage check - Time since last check: {:.2}s",
-                        last_size_check.elapsed().as_secs_f64()
-                    );
-                    let current_size = file_path.metadata()?.len();
-                    let time_diff = last_size_check.elapsed().as_secs_f64();
+                    let elapsed = last_size_check.elapsed().as_secs_f64();
+                    let current_size = file_path
+                        .metadata()
+                        .context("failed to read MCAP file metadata")?
+                        .len();
 
                     if last_file_size > 0 {
-                        growth_rate = (current_size - last_file_size) as f64 / time_diff;
+                        growth_rate = (current_size - last_file_size) as f64 / elapsed;
                     }
 
                     let available_space = get_available_space(file_path)?;
                     let estimated_space_needed = (growth_rate * min_buffer_seconds as f64) as u64;
 
                     debug!(
-                        "Storage stats:\n\
-                        - Current file size: {:.2} MB\n\
-                        - Last file size: {:.2} MB\n\
-                        - Growth rate: {:.2} MB/s\n\
-                        - Available space: {:.2} MB\n\
-                        - Estimated space needed (1min): {:.2} MB\n\
-                        - Time difference: {:.2}s",
+                        "Storage: file={:.1}MB, rate={:.1}MB/s, available={:.1}MB, needed={:.1}MB",
                         current_size as f64 / (1024.0 * 1024.0),
-                        last_file_size as f64 / (1024.0 * 1024.0),
                         growth_rate / (1024.0 * 1024.0),
                         available_space as f64 / (1024.0 * 1024.0),
                         estimated_space_needed as f64 / (1024.0 * 1024.0),
-                        time_diff
                     );
 
                     if available_space < estimated_space_needed {
                         info!(
-                            "Low storage space detected. Growth rate: {:.2} MB/s, Available: {:.2} MB, Needed: {:.2} MB. Stopping recording...",
-                            growth_rate / (1024.0 * 1024.0),
+                            "Low storage: {:.1}MB available, {:.1}MB needed in next 60s. Stopping.",
                             available_space as f64 / (1024.0 * 1024.0),
-                            estimated_space_needed as f64 / (1024.0 * 1024.0)
+                            estimated_space_needed as f64 / (1024.0 * 1024.0),
                         );
-                        out.finish()?;
+                        out.finish().context("failed to finalize MCAP on low storage")?;
                         bus.lock().unwrap().broadcast(1);
                         return Ok(());
                     }
@@ -101,430 +107,367 @@ async fn write_to_file(
                 }
             }
             Err(_) => {
-                out.finish()?;
+                // All senders dropped — recording complete
+                out.finish().context("failed to finalize MCAP")?;
                 return Ok(());
             }
-        };
+        }
     }
 }
 
-fn stream(
+struct TopicRecorder {
     channel_id: u16,
-    start_time: u128,
-    args: &Args,
-    tx: Sender<(MessageHeader, Vec<u8>)>,
-    subscriber_topic: Subscriber<FifoChannelHandler<Sample>>,
-    topic: String,
-    mut exit_signal: BusReader<i32>,
-) -> Result<(), Box<dyn std::error::Error>> {
-    let mut frame_number = 0;
-    loop {
-        match exit_signal.try_recv() {
-            Ok(_) => {
-                debug!(
-                    "Program stopped finishing writing MCAP for {:?}.....",
-                    topic
-                );
-                break;
-            }
-            Err(e) => match e {
-                TryRecvError::Empty => {}
-                TryRecvError::Disconnected => {
-                    debug!(
-                        "Program stopped finishing writing MCAP for {:?}.....",
-                        topic
-                    );
-                    break;
-                }
-            },
-        }
-        match subscriber_topic.recv_timeout(Duration::from_secs(10)) {
-            Ok(sample) => {
-                let data = sample.unwrap().payload().to_bytes().to_vec();
-                let current_time = SystemTime::now();
-                let duration = current_time
-                    .duration_since(UNIX_EPOCH)
-                    .expect("Time went backwards");
-                let unix_time_seconds = duration.as_nanos();
-
-                let _ = tx.send((
-                    MessageHeader {
-                        channel_id,
-                        sequence: frame_number,
-                        log_time: unix_time_seconds as u64,
-                        publish_time: unix_time_seconds as u64,
-                    },
-                    data,
-                ));
-                frame_number += 1;
-
-                if let Some(duration) = args.duration {
-                    if (unix_time_seconds - start_time) / NANO_SEC >= duration {
-                        break;
-                    }
-                }
-            }
-            Err(_) => {
-                warn!("Lost topic: {}", topic);
-                continue;
-            }
-        }
-    }
-
-    Ok(())
+    start_nanos: u64,
+    duration_secs: Option<u64>,
+    tx: SyncSender<(MessageHeader, Vec<u8>)>,
+    frame_duration: Option<Duration>,
 }
 
-fn cube_stream(
-    channel_id: u16,
-    start_time: u128,
-    args: &Args,
-    tx: Sender<(MessageHeader, Vec<u8>)>,
-    subscriber_topic: Subscriber<FifoChannelHandler<Sample>>,
-    topic: String,
+/// Records messages from a single Zenoh topic to the MCAP writer channel.
+/// Optionally rate-limits frames when `frame_duration` is provided (used for radar cube).
+fn record_topic(
+    rec: TopicRecorder,
+    subscriber: Subscriber<FifoChannelHandler<Sample>>,
+    topic: &str,
     mut exit_signal: BusReader<i32>,
-) -> Result<(), Box<dyn std::error::Error>> {
-    let mut frame_number = 0;
-    let frame_duration =
-        Duration::from_secs_f64(1.0 / f64::from(args.get_cube_fps().unwrap_or(30)));
+) {
+    let mut sequence = 0u32;
     let mut next_frame_time = Instant::now();
 
     loop {
-        match exit_signal.try_recv() {
-            Ok(_) => {
-                debug!(
-                    "Program stopped finishing writing MCAP for {:?}.....",
-                    topic
-                );
-                break;
-            }
-            Err(e) => match e {
-                TryRecvError::Empty => {}
-                TryRecvError::Disconnected => {
-                    debug!(
-                        "Program stopped finishing writing MCAP for {:?}.....",
-                        topic
-                    );
-                    break;
-                }
-            },
+        if should_exit(&mut exit_signal) {
+            debug!("Shutting down recorder for {topic}");
+            break;
         }
 
-        match subscriber_topic.recv_timeout(Duration::from_secs(10)) {
-            Ok(sample) => {
-                let now = Instant::now();
-
-                if now >= next_frame_time {
-                    debug!(
-                        "Processing frame: {} | Time since last frame: {:?}",
-                        frame_number,
-                        now.duration_since(
-                            next_frame_time.checked_sub(frame_duration).unwrap_or(now)
-                        )
-                    );
-
-                    let data = sample.unwrap().payload().to_bytes().to_vec();
-                    let current_time = SystemTime::now();
-                    let duration = current_time
-                        .duration_since(UNIX_EPOCH)
-                        .expect("Time went backwards");
-                    let unix_time_seconds = duration.as_nanos();
-
-                    let _ = tx.send((
-                        MessageHeader {
-                            channel_id,
-                            sequence: frame_number,
-                            log_time: unix_time_seconds as u64,
-                            publish_time: unix_time_seconds as u64,
-                        },
-                        data,
-                    ));
-                    frame_number += 1;
-
-                    next_frame_time += frame_duration;
-                    if next_frame_time < now {
-                        next_frame_time = now + frame_duration;
-                    }
-
-                    if let Some(duration) = args.duration {
-                        if (unix_time_seconds - start_time) / NANO_SEC >= duration {
-                            break;
-                        }
-                    }
-                }
-            }
+        let sample = match subscriber.recv_timeout(Duration::from_secs(10)) {
+            Ok(sample) => sample,
             Err(_) => {
-                warn!("Lost topic: {}", topic);
+                warn!("No data received on {topic} for 10s, retrying...");
                 continue;
+            }
+        };
+
+        let sample = match sample {
+            Some(sample) => sample,
+            None => continue,
+        };
+
+        // Rate limiting for high-bandwidth topics (e.g. radar cube)
+        if let Some(interval) = rec.frame_duration {
+            let now = Instant::now();
+            if now < next_frame_time {
+                continue;
+            }
+            next_frame_time += interval;
+            if next_frame_time < now {
+                next_frame_time = now + interval;
+            }
+        }
+
+        let data = sample.payload().to_bytes().into_owned();
+        let timestamp_ns = timestamp_nanos();
+
+        let header = MessageHeader {
+            channel_id: rec.channel_id,
+            sequence,
+            log_time: timestamp_ns,
+            publish_time: timestamp_ns,
+        };
+
+        if rec.tx.send((header, data)).is_err() {
+            debug!("Writer channel closed, stopping {topic}");
+            break;
+        }
+
+        sequence += 1;
+
+        if let Some(max_secs) = rec.duration_secs {
+            if (timestamp_ns - rec.start_nanos) / NANOS_PER_SEC >= max_secs {
+                debug!("Duration limit reached for {topic}");
+                break;
             }
         }
     }
-
-    Ok(())
 }
 
-fn get_storage() -> Result<String, std::io::Error> {
+fn get_storage_dir() -> Result<String> {
     match std::env::var("STORAGE") {
-        // If the environment variable is not set, return only the filename.
-        Err(_) => Ok("".to_owned()),
+        Err(_) => Ok(String::new()),
         Ok(storage) => {
-            debug!("STORAGE={}", storage);
-            match fs::create_dir_all(&storage) {
-                Ok(_) => Ok(storage),
-                Err(e) => {
-                    error!("Failed to create STORAGE {}: {}", storage, e);
-                    Err(e)
-                }
-            }
+            debug!("STORAGE={storage}");
+            fs::create_dir_all(&storage)
+                .with_context(|| format!("failed to create storage directory: {storage}"))?;
+            Ok(storage)
         }
     }
 }
 
 fn get_filename() -> String {
-    let current_time = Local::now();
-    let formatted_time = current_time.format("%Y_%m_%d_%H_%M_%S").to_string();
-    match hostname::get() {
-        // If hostname fails for whatever reason then use maivin-recorder as the prefix.
-        Ok(hostname) => match hostname.to_str() {
-            Some(hostname) => format!("{}_{}.mcap", hostname, formatted_time),
-            None => format!("maivin-recorder_{}.mcap", formatted_time),
-        },
-        Err(e) => {
-            warn!("Failed to get hostname: {}", e);
-            format!("maivin-recorder_{}.mcap", formatted_time)
-        }
+    let timestamp = Local::now().format("%Y_%m_%d_%H_%M_%S");
+    let prefix = hostname::get()
+        .ok()
+        .and_then(|h| h.to_str().map(String::from))
+        .unwrap_or_else(|| "maivin-recorder".to_string());
+    format!("{prefix}_{timestamp}.mcap")
+}
+
+/// Normalizes topic names to use the `rt/` prefix convention used by Zenoh
+/// for ROS 2 topic bridging.
+fn normalize_topic(topic: &str) -> String {
+    if topic.starts_with('/') {
+        format!("rt{topic}")
+    } else if !topic.starts_with("rt/") {
+        format!("rt/{topic}")
+    } else {
+        topic.to_string()
     }
 }
 
-async fn discover_topics(args: &Args, session: &Session) -> Result<Vec<String>, Box<dyn Error>> {
-    let subscriber = match timeout(
-        Duration::from_secs(args.timeout),
+/// Strips the `rt` prefix from a topic name for use as the MCAP channel topic.
+fn mcap_topic(topic: &str) -> &str {
+    topic.strip_prefix("rt").unwrap_or(topic)
+}
+
+async fn discover_topics(session: &Session, timeout_secs: u64) -> Result<Vec<String>> {
+    let subscriber = timeout(
+        TokioDuration::from_secs(timeout_secs),
         session.declare_subscriber("**"),
     )
-    .await?
-    {
-        Ok(subscriber) => subscriber,
-        Err(err) => return Err(err),
-    };
+    .await
+    .context("timed out connecting to Zenoh for topic discovery")?
+    .map_err(|e| anyhow!("failed to declare wildcard subscriber: {e}"))?;
 
     let mut topics = HashSet::new();
-    let start_time = Instant::now();
+    let start = Instant::now();
+    let deadline = Duration::from_secs(timeout_secs);
 
-    while start_time.elapsed() < Duration::from_secs(args.timeout) {
-        let sample = subscriber
-            .recv_timeout(Duration::from_secs(args.timeout))
-            .unwrap()
-            .unwrap();
-        let topic = sample.key_expr().to_string();
-        if topics.insert(topic.clone()) {
-            info!(
-                "Found {:?} will start recording in {:?} seconds",
-                topic,
-                (Duration::from_secs(args.timeout) - start_time.elapsed()).as_secs() as i64
-            );
+    while start.elapsed() < deadline {
+        match subscriber.recv_timeout(Duration::from_secs(timeout_secs)) {
+            Ok(Some(sample)) => {
+                let topic = sample.key_expr().to_string();
+                if topics.insert(topic.clone()) {
+                    let remaining = deadline.saturating_sub(start.elapsed()).as_secs();
+                    info!("Discovered {topic}, recording starts in {remaining}s");
+                }
+            }
+            Ok(None) => continue,
+            Err(_) => break,
         }
     }
 
     drop(subscriber);
-    Ok(Vec::from_iter(topics))
+    Ok(topics.into_iter().collect())
+}
+
+/// Resolves the encoding (schema name) for a topic by reading the first sample.
+async fn resolve_encoding(
+    session: &Session,
+    topic: &str,
+    timeout_secs: u64,
+) -> Result<Option<String>> {
+    let subscriber = timeout(
+        TokioDuration::from_secs(timeout_secs),
+        session.declare_subscriber(topic),
+    )
+    .await
+    .with_context(|| format!("timed out subscribing to {topic}"))?
+    .map_err(|e| anyhow!("failed to declare subscriber for {topic}: {e}"))?;
+
+    match subscriber.recv_timeout(Duration::from_secs(timeout_secs)) {
+        Ok(Some(sample)) => {
+            let encoding = sample
+                .encoding()
+                .to_string()
+                .split(';')
+                .next_back()
+                .unwrap_or_default()
+                .to_string();
+            Ok(Some(encoding))
+        }
+        Ok(None) => {
+            warn!("Received empty sample from {topic}");
+            Ok(None)
+        }
+        Err(_) => {
+            warn!("Timed out waiting for data on {topic}");
+            Ok(None)
+        }
+    }
 }
 
 #[tokio::main]
-async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let mut args = Args::parse();
-    let schemas = schemas::get_all();
-    let session = zenoh::open(args.clone()).await.unwrap();
-
+async fn main() -> Result<()> {
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
+
+    let args = Args::parse();
+    let schemas = schemas::get_all();
+
+    let session = zenoh::open(args.clone())
+        .await
+        .map_err(|e| anyhow!("failed to open Zenoh session: {e}"))?;
+
     if args.topics.is_empty() && !args.all_topics {
-        return Err("No topics are specified and --all-topics flag is FALSE exiting".into());
+        bail!("no topics specified — provide topics as arguments or use --all-topics");
     }
 
-    args.topics = match args.all_topics {
-        true => match discover_topics(&args, &session).await {
-            Ok(topics) => topics,
-            Err(e) => return Err(format!("unable to discover topics: {}", e).into()),
-        },
-        false => args.topics,
-    };
-
-    args.topics = args
-        .topics
-        .iter()
-        .map(|topic| {
-            if topic.starts_with('/') {
-                format!("rt{}", topic)
-            } else if !topic.starts_with("rt/") {
-                format!("rt/{}", topic)
-            } else {
-                topic.to_owned()
-            }
-        })
-        .collect();
-
-    let mut tasks = Vec::new();
-
-    for topic in &args.topics {
-        let topic = topic.clone(); // Cloning topic if needed later
-        let session_arc = Arc::new(session.clone());
-        let task = tokio::spawn(async move {
-            let subscriber = match timeout(
-                Duration::from_secs(args.timeout),
-                session_arc.declare_subscriber(&topic),
-            )
+    // Discover or normalize topics
+    let topics: Vec<String> = if args.all_topics {
+        discover_topics(&session, args.timeout)
             .await
-            {
-                Ok(Ok(subscriber)) => subscriber,
-                Ok(Err(err)) => {
-                    return Err(e::other(format!("failed to declare subscriber: {}", err)));
-                }
-                Err(_) => {
-                    return Err(e::other("timeout while declaring subscriber"));
-                }
-            };
-
-            let enc = match subscriber.recv_timeout(Duration::from_secs(args.timeout)) {
-                Ok(sample) => sample
-                    .unwrap()
-                    .encoding()
-                    .to_string()
-                    .split(';')
-                    .next_back()
-                    .unwrap()
-                    .to_string(),
-                Err(_) => {
-                    warn!("Timed out waiting on topic {}", topic);
-                    "Topic Unavailable".to_string()
-                }
-            };
-            Ok((topic, enc))
-        });
-
-        tasks.push(task);
-    }
-
-    let mut topics = HashMap::new();
-
-    for task in tasks {
-        match task.await {
-            Ok(result) => match result {
-                Ok((topic, encoding)) => {
-                    debug!("Encoding for {:?} is {:?}", topic, encoding);
-                    if encoding != "Topic Unavailable" {
-                        info!("Subscribed to {} and started recording", topic);
-                        topics.insert(topic, encoding);
-                    }
-                }
-                Err(err) => {
-                    warn!("{}", err);
-                }
-            },
-            Err(err) => {
-                warn!("Error occurred: {}", err);
-            }
-        }
-    }
+            .context("topic discovery failed")?
+    } else {
+        args.topics.iter().map(|t| normalize_topic(t)).collect()
+    };
 
     if topics.is_empty() {
-        return Err("No valid topics discovered".into());
+        bail!("no topics found during discovery");
     }
 
-    let filename = Path::new(&get_storage()?).join(get_filename());
+    // Resolve encodings for all topics concurrently
+    let mut tasks = Vec::new();
+    for topic in &topics {
+        let session = session.clone();
+        let topic = topic.clone();
+        let timeout_secs = args.timeout;
+        tasks.push(tokio::spawn(async move {
+            let encoding = resolve_encoding(&session, &topic, timeout_secs).await;
+            (topic, encoding)
+        }));
+    }
+
+    let mut topic_encodings = HashMap::new();
+    for task in tasks {
+        let (topic, result) = task.await.context("topic resolution task panicked")?;
+        match result {
+            Ok(Some(encoding)) => {
+                info!("Subscribed to {topic} (encoding: {encoding})");
+                topic_encodings.insert(topic, encoding);
+            }
+            Ok(None) => {
+                warn!("Skipping {topic}: no data received within timeout");
+            }
+            Err(e) => {
+                warn!("Skipping {topic}: {e}");
+            }
+        }
+    }
+
+    if topic_encodings.is_empty() {
+        bail!("no topics with valid encodings found — check that Zenoh publishers are running");
+    }
+
+    // Create MCAP output file
+    let filename = Path::new(&get_storage_dir()?).join(get_filename());
     info!("Recording to {}", filename.display());
-    let file = match fs::File::create(&filename) {
-        Ok(file) => file,
-        Err(e) => return Err(format!("Failed to create {}: {}", filename.display(), e).into()),
-    };
-    let bufwriter = BufWriter::new(file);
+
+    let file = fs::File::create(&filename)
+        .with_context(|| format!("failed to create {}", filename.display()))?;
+
     let mut out = WriteOptions::new()
         .compression(args.compression.clone().into())
-        .create(bufwriter)?;
+        .create(BufWriter::new(file))
+        .context("failed to initialize MCAP writer")?;
 
     let bus = Arc::new(Mutex::new(Bus::new(1)));
-    let mut futures = Vec::new();
-    let (tx, rx) = mpsc::channel();
+    let (tx, rx) = mpsc::sync_channel(CHANNEL_CAPACITY);
+    let mut thread_handles = Vec::new();
 
-    for (topic, encoding) in topics {
-        match schemas.get(format!("schemas/{}.msg", encoding).as_str()) {
-            Some(schema) => {
-                let schema_id = out.add_schema(&encoding, "ros2msg", schema.as_bytes())?;
-                let channel_id = out.add_channel(
-                    schema_id,
-                    &topic.replace("rt", ""),
-                    "cdr",
-                    &BTreeMap::default(),
-                )?;
-
-                let args = args.clone();
-                let tx = tx.clone();
-                let session = session.clone();
-                let rx = bus.lock().unwrap().add_rx();
-                let topic = topic.clone();
-
-                futures.push(std::thread::spawn(move || {
-                    tokio::runtime::Builder::new_current_thread()
-                        .enable_all()
-                        .build()
-                        .unwrap()
-                        .block_on(launch_stream(session, args, topic, channel_id, tx, rx));
-                }));
-            }
+    for (topic, encoding) in &topic_encodings {
+        let schema_key = format!("schemas/{encoding}.msg");
+        let schema = match schemas.get(schema_key.as_str()) {
+            Some(schema) => schema,
             None => {
-                warn!("No schema found for topic: {topic} encoding: {encoding}");
+                warn!("No schema for {topic} (encoding: {encoding}), skipping");
                 continue;
             }
-        }
+        };
+
+        let schema_id = out
+            .add_schema(encoding, "ros2msg", schema.as_bytes())
+            .with_context(|| format!("failed to add schema for {encoding}"))?;
+
+        let channel_id = out
+            .add_channel(
+                schema_id,
+                mcap_topic(topic),
+                "cdr",
+                &BTreeMap::default(),
+            )
+            .with_context(|| format!("failed to add MCAP channel for {topic}"))?;
+
+        let frame_duration = if args.cube_fps.is_some() && topic == "rt/radar/cube" {
+            args.cube_fps()
+                .map(|fps| Duration::from_secs_f64(1.0 / f64::from(fps)))
+        } else {
+            None
+        };
+
+        let duration_secs = args.duration;
+        let tx = tx.clone();
+        let session = session.clone();
+        let exit_signal = bus.lock().unwrap().add_rx();
+        let topic = topic.clone();
+
+        thread_handles.push(std::thread::spawn(move || {
+            let rt = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .expect("failed to create per-topic Tokio runtime");
+
+            rt.block_on(async {
+                let start_nanos = timestamp_nanos();
+                let subscriber = match session.declare_subscriber(&topic).await {
+                    Ok(sub) => sub,
+                    Err(e) => {
+                        error!("Failed to subscribe to {topic}: {e}");
+                        return;
+                    }
+                };
+
+                record_topic(
+                    TopicRecorder {
+                        channel_id,
+                        start_nanos,
+                        duration_secs,
+                        tx,
+                        frame_duration,
+                    },
+                    subscriber,
+                    &topic,
+                    exit_signal,
+                );
+            });
+        }));
     }
 
-    let mut signals = Signals::new([SIGINT, SIGTERM]).expect("Error creating signal iterator");
+    // Signal handler thread
     let bus_clone = bus.clone();
     std::thread::spawn(move || {
+        let mut signals =
+            Signals::new([SIGINT, SIGTERM]).expect("failed to register signal handlers");
         for signal in signals.forever() {
             match signal {
-                SIGINT => {
-                    debug!("Received Ctrl+C (SIGINT) signal");
-                    bus_clone.lock().unwrap().broadcast(1);
-                    break;
-                }
-                SIGTERM => {
-                    bus_clone.lock().unwrap().broadcast(1);
-                    debug!("Received SIGTERM signal");
-                    break;
-                }
-                _ => {}
+                SIGINT => debug!("Received SIGINT"),
+                SIGTERM => debug!("Received SIGTERM"),
+                _ => continue,
             }
+            bus_clone.lock().unwrap().broadcast(1);
+            break;
         }
     });
+
+    // Drop the sender so the writer knows when all streams finish
     drop(tx);
 
-    if let Err(err) = write_to_file(out, rx, &filename, bus).await {
-        return Err(format!("Error writing to file: {}", err).into());
-    }
+    // Writer runs on the main thread
+    write_to_file(out, rx, &filename, bus)?;
 
-    for fut in futures {
-        fut.join().unwrap();
+    // Wait for all stream threads to finish
+    for handle in thread_handles {
+        let _ = handle.join();
     }
 
     info!("Saved MCAP to {}", filename.display());
-    std::process::exit(0);
-}
-
-async fn launch_stream(
-    session: Session,
-    args: Args,
-    topic: String,
-    channel_id: u16,
-    tx: Sender<(MessageHeader, Vec<u8>)>,
-    rx: BusReader<i32>,
-) {
-    let start_time = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap()
-        .as_nanos();
-
-    let subscriber = session.declare_subscriber(topic.clone()).await.unwrap();
-    if args.cube_fps.is_some() && topic == "rt/radar/cube" {
-        cube_stream(channel_id, start_time, &args, tx, subscriber, topic, rx).unwrap();
-    } else {
-        stream(channel_id, start_time, &args, tx, subscriber, topic, rx).unwrap();
-    }
+    Ok(())
 }
