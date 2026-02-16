@@ -97,7 +97,8 @@ fn write_to_file(
                             available_space as f64 / (1024.0 * 1024.0),
                             estimated_space_needed as f64 / (1024.0 * 1024.0),
                         );
-                        out.finish().context("failed to finalize MCAP on low storage")?;
+                        out.finish()
+                            .context("failed to finalize MCAP on low storage")?;
                         bus.lock().unwrap().broadcast(1);
                         return Ok(());
                     }
@@ -388,12 +389,7 @@ async fn main() -> Result<()> {
             .with_context(|| format!("failed to add schema for {encoding}"))?;
 
         let channel_id = out
-            .add_channel(
-                schema_id,
-                mcap_topic(topic),
-                "cdr",
-                &BTreeMap::default(),
-            )
+            .add_channel(schema_id, mcap_topic(topic), "cdr", &BTreeMap::default())
             .with_context(|| format!("failed to add MCAP channel for {topic}"))?;
 
         let frame_duration = if args.cube_fps.is_some() && topic == "rt/radar/cube" {
