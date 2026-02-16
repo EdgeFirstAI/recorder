@@ -7,6 +7,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.6.0] - 2026-02-16
+
+### Changed
+
+- Refactored error handling to use anyhow consistently with descriptive context messages
+- Merged duplicate stream recording functions into single `record_topic` with optional rate limiting
+- Replaced unbounded message channel with bounded channel (capacity 64) for backpressure
+- Removed nightly-only rustfmt options for stable toolchain compatibility
+- Rewrote README.md with features, supported topics, CLI reference, and quick start guide
+- Rewrote ARCHITECTURE.md with mermaid diagrams for threading, data flow, and shutdown
+- Release workflow now reuses CI build artifacts instead of rebuilding
+
+### Added
+
+- Created TESTING.md with Foxglove Studio verification workflow
+- Added unit tests for CLI argument parsing (parse_fps, cube_fps)
+
+### Fixed
+
+- Fixed topic prefix stripping bug where `topic.replace("rt", "")` could corrupt topic names containing "rt" (now uses `strip_prefix`)
+
+### Removed
+
+- Removed dead test file (src/test.rs) that was never compiled
+- Removed legacy Bitbucket Pipelines configuration
+
 ## [1.5.0] - 2025-12-26
 
 ### Changed
