@@ -1,17 +1,19 @@
 # GitHub Actions workflow for publishing releases
 #
-# This workflow orchestrates release publishing when a version tag is pushed:
-# - Calls test, build, and sbom workflows
-# - Creates GitHub Release with binaries, documentation, and SBOM
+# This workflow publishes release artifacts when a version tag is pushed.
+# It does NOT rebuild artifacts — instead it waits for the build.yml and
+# sbom.yml workflows (triggered by the same commit on main) to complete,
+# then downloads their artifacts for the GitHub Release.
 #
 # Release Process:
-# 1. Update version in Cargo.toml
-# 2. Update CHANGELOG.md with version entry
-# 3. Create and push tag: git tag v1.0.0 && git push --tags
+# 1. Update version in Cargo.toml and CHANGELOG.md
+# 2. Commit and push to main
+# 3. Tag: git tag -a -s -m "Version X.Y.Z" vX.Y.Z && git push origin vX.Y.Z
 #
 # Action Versions (hash-pinned per SPS v2.1):
 # - actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 (v4)
-# - actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 (v4)
+# - lewagon/wait-on-check-action@ccfb013c15c8afb7bf2b7c028fb74dc5a068cccc (v1.3.4)
+# - dawidd6/action-download-artifact@bf251b5aa9c2f7eeb574a96ee720e24f801b7c11 (v6)
 # - softprops/action-gh-release@a06a81a03ee405af7f2048a818ed3f03bbf83c7b (v2)
 
 name: Release
@@ -21,6 +23,9 @@ on:
     tags: ['v*']
 
 jobs:
+  # ==========================================================================
+  # Prepare Release Information
+  # ==========================================================================
   prepare-release:
     name: Prepare Release Information
     runs-on: ubuntu-22.04
@@ -46,83 +51,123 @@ jobs:
         run: |
           VERSION=${GITHUB_REF#refs/tags/v}
 
-          # Extract changelog section for this version
-          # Format: ## [X.Y.Z] - YYYY-MM-DD
-          if [ -f CHANGELOG.md ]; then
-            CHANGELOG=$(awk -v ver="$VERSION" '
-              /^## \['"$VERSION"'\]/ { found=1; next }
-              found && /^## \[/ { exit }
-              found { print }
-            ' CHANGELOG.md)
-          fi
+          CHANGELOG=$(awk -v ver="$VERSION" '
+            /^## \['"$VERSION"'\]/ { found=1; next }
+            found && /^## \[/ { exit }
+            found { print }
+          ' CHANGELOG.md)
 
           if [ -z "$CHANGELOG" ]; then
-            echo "WARNING: No changelog entry found for version $VERSION"
-            CHANGELOG="See commit history for details."
+            echo "ERROR: No changelog entry found for version $VERSION"
+            exit 1
           fi
 
           echo "changelog<<EOF" >> $GITHUB_OUTPUT
           echo "$CHANGELOG" >> $GITHUB_OUTPUT
           echo "EOF" >> $GITHUB_OUTPUT
 
-  build-artifacts:
-    name: Build Release Artifacts
-    needs: prepare-release
-    uses: ./.github/workflows/build.yml
+          echo "Extracted changelog:"
+          echo "$CHANGELOG"
 
-  build-sbom:
-    name: Generate SBOM
-    needs: prepare-release
-    uses: ./.github/workflows/sbom.yml
+  # ==========================================================================
+  # Wait for CI Workflows to Complete
+  # ==========================================================================
+  wait-for-ci:
+    name: Wait for CI Workflows
+    needs: [prepare-release]
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Wait for Build workflow
+        uses: lewagon/wait-on-check-action@ccfb013c15c8afb7bf2b7c028fb74dc5a068cccc  # v1.3.4
+        with:
+          ref: ${{ github.sha }}
+          check-name: 'Verify Builds'
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+          wait-interval: 10
 
-  run-tests:
-    name: Run Tests
-    needs: prepare-release
-    uses: ./.github/workflows/test.yml
-    secrets: inherit
+      - name: Wait for SBOM workflow
+        uses: lewagon/wait-on-check-action@ccfb013c15c8afb7bf2b7c028fb74dc5a068cccc  # v1.3.4
+        with:
+          ref: ${{ github.sha }}
+          check-name: 'Generate SBOM & Check License Compliance'
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+          wait-interval: 10
 
+  # ==========================================================================
+  # Create GitHub Release with pre-built artifacts
+  # ==========================================================================
   create-github-release:
     name: Create GitHub Release
     runs-on: ubuntu-22.04
     needs:
       - prepare-release
-      - build-artifacts
-      - build-sbom
-      - run-tests
+      - wait-for-ci
     permissions:
       contents: write
+      actions: read
 
     steps:
-      - name: Checkout code
-        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4
-
-      - name: Download all artifacts
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093  # v4
+      - name: Download x86_64 package
+        uses: dawidd6/action-download-artifact@bf251b5aa9c2f7eeb574a96ee720e24f801b7c11  # v6
         with:
-          path: artifacts
+          workflow: build.yml
+          commit: ${{ github.sha }}
+          name: packages-x86_64
+          path: artifacts/packages-x86_64
+
+      - name: Download aarch64 package
+        uses: dawidd6/action-download-artifact@bf251b5aa9c2f7eeb574a96ee720e24f801b7c11  # v6
+        with:
+          workflow: build.yml
+          commit: ${{ github.sha }}
+          name: packages-aarch64
+          path: artifacts/packages-aarch64
+
+      - name: Download SBOM
+        uses: dawidd6/action-download-artifact@bf251b5aa9c2f7eeb574a96ee720e24f801b7c11  # v6
+        with:
+          workflow: sbom.yml
+          commit: ${{ github.sha }}
+          name: sbom
+          path: artifacts/sbom
 
       - name: Organize release assets
+        env:
+          VERSION: ${{ needs.prepare-release.outputs.version }}
         run: |
           mkdir -p release-assets
 
           # Copy x86_64 binary
           if [ -f artifacts/packages-x86_64/edgefirst-recorder-x86_64 ]; then
             cp artifacts/packages-x86_64/edgefirst-recorder-x86_64 \
-               release-assets/edgefirst-recorder-v${{ needs.prepare-release.outputs.version }}-linux-x86_64
+               "release-assets/edgefirst-recorder-v${VERSION}-linux-x86_64"
+            echo "✓ x86_64 binary"
+          else
+            echo "ERROR: x86_64 binary not found"
+            exit 1
           fi
 
           # Copy ARM64 binary
           if [ -f artifacts/packages-aarch64/edgefirst-recorder-aarch64 ]; then
             cp artifacts/packages-aarch64/edgefirst-recorder-aarch64 \
-               release-assets/edgefirst-recorder-v${{ needs.prepare-release.outputs.version }}-linux-aarch64
+               "release-assets/edgefirst-recorder-v${VERSION}-linux-aarch64"
+            echo "✓ aarch64 binary"
+          else
+            echo "ERROR: aarch64 binary not found"
+            exit 1
           fi
 
           # Copy SBOM
           if [ -f artifacts/sbom/sbom.json ]; then
             cp artifacts/sbom/sbom.json \
-               release-assets/edgefirst-recorder-v${{ needs.prepare-release.outputs.version }}-sbom.json
+               "release-assets/edgefirst-recorder-v${VERSION}-sbom.json"
+            echo "✓ SBOM"
+          else
+            echo "ERROR: SBOM not found"
+            exit 1
           fi
 
+          echo ""
           echo "Release assets prepared:"
           ls -lh release-assets/
 
@@ -163,4 +208,4 @@ jobs:
             release-assets/*
           draft: false
           prerelease: ${{ contains(needs.prepare-release.outputs.version, '-') }}
-          fail_on_unmatched_files: false
+          fail_on_unmatched_files: true
