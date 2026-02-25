@@ -107,6 +107,9 @@ jobs:
       actions: read
 
     steps:
+      - name: Checkout code
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4
+
       - name: Download x86_64 package
         uses: dawidd6/action-download-artifact@bf251b5aa9c2f7eeb574a96ee720e24f801b7c11  # v6
         with:
@@ -167,6 +170,10 @@ jobs:
             exit 1
           fi
 
+          # Copy default configuration file
+          cp recorder.default release-assets/recorder.default
+          echo "✓ Default configuration"
+
           echo ""
           echo "Release assets prepared:"
           ls -lh release-assets/
@@ -178,23 +185,24 @@ jobs:
           body: |
             # EdgeFirst Recorder v${{ needs.prepare-release.outputs.version }}
 
-            ## Downloads
-
-            - **Linux x86_64**: `edgefirst-recorder-v${{ needs.prepare-release.outputs.version }}-linux-x86_64`
-            - **Linux ARM64**: `edgefirst-recorder-v${{ needs.prepare-release.outputs.version }}-linux-aarch64`
-            - **SBOM**: `edgefirst-recorder-v${{ needs.prepare-release.outputs.version }}-sbom.json`
-
             ## Installation
 
+            ### Download Binaries
+
+            | Platform | Binary |
+            |----------|--------|
+            | Linux x86_64 | `edgefirst-recorder-v${{ needs.prepare-release.outputs.version }}-linux-x86_64` |
+            | Linux ARM64 | `edgefirst-recorder-v${{ needs.prepare-release.outputs.version }}-linux-aarch64` |
+            | Configuration | `recorder.default` |
+
             ```bash
-            # Download binary (replace URL with your platform)
+            # Download and install (ARM64 example)
             wget https://github.com/EdgeFirstAI/recorder/releases/download/v${{ needs.prepare-release.outputs.version }}/edgefirst-recorder-v${{ needs.prepare-release.outputs.version }}-linux-aarch64
-
-            # Make executable
             chmod +x edgefirst-recorder-v${{ needs.prepare-release.outputs.version }}-linux-aarch64
+            sudo mv edgefirst-recorder-v${{ needs.prepare-release.outputs.version }}-linux-aarch64 /usr/local/bin/edgefirst-recorder
 
-            # Run
-            ./edgefirst-recorder-v${{ needs.prepare-release.outputs.version }}-linux-aarch64 --help
+            # Install default configuration (optional)
+            sudo cp recorder.default /etc/default/recorder
             ```
 
             ## What's Changed

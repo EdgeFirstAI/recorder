@@ -5,10 +5,17 @@ use clap::{Parser, ValueEnum};
 use serde_json::json;
 use zenoh::config::{Config, WhatAmI};
 
+/// MCAP compression algorithm.
+///
+/// Controls how recorded data is compressed inside the MCAP file.
+/// Compression reduces file size at the cost of CPU during recording.
 #[derive(ValueEnum, Debug, Clone)]
 pub enum Compression {
+    /// No compression (fastest recording, largest files)
     None,
+    /// LZ4 compression (fast, moderate compression ratio)
     Lz4,
+    /// Zstandard compression (slower, best compression ratio)
     Zstd,
 }
 
@@ -22,11 +29,29 @@ impl From<Compression> for Option<mcap::Compression> {
     }
 }
 
+/// Command-line arguments for EdgeFirst Recorder.
+///
+/// This structure defines all configuration options for the recorder node,
+/// including recording duration, topic selection, MCAP compression, and
+/// Zenoh configuration. Arguments can be specified via command line or
+/// environment variables.
+///
+/// # Example
+///
+/// ```bash
+/// # Via command line
+/// edgefirst-recorder --duration 60 --compression lz4 --all-topics
+///
+/// # Via environment variables
+/// export DURATION=60
+/// export COMPRESSION=lz4
+/// edgefirst-recorder --all-topics
+/// ```
 #[derive(Parser, Debug, Clone)]
 #[command(author, version, about, long_about = None)]
 pub struct Args {
     /// Duration for the recording in seconds
-    #[arg(short, long, env)]
+    #[arg(short, long, env = "DURATION")]
     pub duration: Option<u64>,
 
     /// Topic detection timeout in seconds
@@ -34,11 +59,11 @@ pub struct Args {
     pub timeout: u64,
 
     /// MCAP compression algorithm
-    #[arg(env, short = 'z', long, value_enum, default_value_t = Compression::None)]
+    #[arg(env = "COMPRESSION", short = 'z', long, value_enum, default_value_t = Compression::None)]
     pub compression: Compression,
 
     /// Topics to record (space-delimited)
-    #[arg(env, required = false, value_delimiter = ' ')]
+    #[arg(env = "TOPICS", required = false, value_delimiter = ' ')]
     pub topics: Vec<String>,
 
     /// Discover and record all available topics
@@ -46,23 +71,23 @@ pub struct Args {
     pub all_topics: bool,
 
     /// Limit the frame rate of the radar cube topic. Use 'MAX' for native rate.
-    #[arg(long, env, value_parser = parse_fps)]
+    #[arg(long, env = "CUBE_FPS", value_parser = parse_fps)]
     pub cube_fps: Option<u32>,
 
-    /// Zenoh connection mode
-    #[arg(long, env, default_value = "peer")]
+    /// Zenoh participant mode (peer, client, or router)
+    #[arg(long, env = "MODE", default_value = "peer")]
     pub mode: WhatAmI,
 
-    /// Zenoh endpoints to connect to
-    #[arg(long, env)]
+    /// Zenoh endpoints to connect to (can specify multiple)
+    #[arg(long, env = "CONNECT")]
     pub connect: Vec<String>,
 
-    /// Zenoh endpoints to listen on
-    #[arg(long, env)]
+    /// Zenoh endpoints to listen on (can specify multiple)
+    #[arg(long, env = "LISTEN")]
     pub listen: Vec<String>,
 
     /// Disable Zenoh multicast scouting
-    #[arg(long, env)]
+    #[arg(long, env = "NO_MULTICAST_SCOUTING")]
     pub no_multicast_scouting: bool,
 }
 

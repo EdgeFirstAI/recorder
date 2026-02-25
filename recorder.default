@@ -1,0 +1,72 @@
+# EdgeFirst Recorder Configuration
+#
+# This file is loaded by the systemd service as an EnvironmentFile. Every
+# variable here maps to a command-line flag of the same name (lower-case,
+# with dashes replaced by underscores). Command-line flags take precedence
+# over environment variables.
+#
+# Syntax rules (systemd EnvironmentFile):
+#   - Lines beginning with # or ; are comments.
+#   - KEY=VALUE pairs, one per line.
+#   - Quoting is optional; quotes are stripped by systemd.
+#   - No spaces around the '=' sign.
+
+# ---------------------------------------------------------------------------
+# Recording Duration
+# ---------------------------------------------------------------------------
+# Maximum recording duration in seconds. When set, the recorder stops
+# automatically after this many seconds. Leave empty for unlimited recording
+# (stop manually with Ctrl-C or SIGTERM).
+DURATION=""
+
+# ---------------------------------------------------------------------------
+# MCAP Compression
+# ---------------------------------------------------------------------------
+# Compression algorithm used inside the MCAP file. Compression reduces file
+# size at the cost of additional CPU usage during recording.
+# Accepted values: none, lz4, zstd
+#   none  - No compression (fastest recording, largest files)
+#   lz4   - LZ4 compression (fast, moderate compression ratio)
+#   zstd  - Zstandard compression (slower, best compression ratio)
+COMPRESSION="none"
+
+# ---------------------------------------------------------------------------
+# Topics
+# ---------------------------------------------------------------------------
+# Space-delimited list of Zenoh topics to record. When set, only these
+# specific topics are recorded. When empty, use the --all-topics flag or
+# specify topics on the command line.
+# Example: TOPICS="rt/camera/h264 rt/radar/cube"
+TOPICS=""
+
+# ---------------------------------------------------------------------------
+# Radar Cube FPS Limit
+# ---------------------------------------------------------------------------
+# Limit the frame rate of the radar cube topic to reduce file size. Set to a
+# positive integer for the desired FPS, or leave empty to skip the radar cube
+# topic entirely. Use "MAX" on the command line to record at native rate (this
+# cannot be expressed as an environment variable — omit CUBE_FPS to skip, or
+# set a numeric value to limit).
+CUBE_FPS=""
+
+# ---------------------------------------------------------------------------
+# Zenoh Networking
+# ---------------------------------------------------------------------------
+# Zenoh participant mode. In "peer" mode nodes discover each other via
+# multicast. Use "client" to connect to a Zenoh router, or "router" to act
+# as one.
+# Accepted values: peer, client, router
+MODE="peer"
+
+# Zenoh endpoint(s) to connect to. Required when MODE is "client".
+# Example: CONNECT="tcp/192.168.1.1:7447"
+CONNECT=""
+
+# Zenoh endpoint(s) to listen on. Useful when running as a router or when
+# peers need to reach this node on a specific address/port.
+LISTEN=""
+
+# Disable Zenoh multicast scouting (peer auto-discovery). Set to true when
+# operating in networks where multicast is unavailable or undesired, and use
+# CONNECT/LISTEN for explicit endpoint configuration instead.
+NO_MULTICAST_SCOUTING="false"
