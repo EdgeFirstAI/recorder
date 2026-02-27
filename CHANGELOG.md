@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.7.0] - 2026-02-26
+
+### Changed
+
+- Shortened environment variable names to use explicit short forms (DURATION, COMPRESSION, TOPICS, CUBE_FPS, MODE, CONNECT, LISTEN, NO_MULTICAST_SCOUTING)
+
+### Added
+
+- Added complete `recorder.default` configuration file for systemd EnvironmentFile usage
+- Added `recorder.default` as a release artifact in GitHub Releases
+
 ## [1.6.1] - 2026-02-16
 
 ### Fixed
