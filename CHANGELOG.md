@@ -18,6 +18,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added complete `recorder.default` configuration file for systemd EnvironmentFile usage
 - Added `recorder.default` as a release artifact in GitHub Releases
 
+### Fixed
+
+- Fixed release workflow race condition where CI check wait failed before sentinel jobs were registered
+
 ## [1.6.1] - 2026-02-16
 
 ### Fixed

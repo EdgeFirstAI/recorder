@@ -77,19 +77,11 @@ jobs:
     needs: [prepare-release]
     runs-on: ubuntu-22.04
     steps:
-      - name: Wait for Build workflow
+      - name: Wait for all CI checks to complete
         uses: lewagon/wait-on-check-action@ccfb013c15c8afb7bf2b7c028fb74dc5a068cccc  # v1.3.4
         with:
           ref: ${{ github.sha }}
-          check-name: 'Verify Builds'
-          repo-token: ${{ secrets.GITHUB_TOKEN }}
-          wait-interval: 10
-
-      - name: Wait for SBOM workflow
-        uses: lewagon/wait-on-check-action@ccfb013c15c8afb7bf2b7c028fb74dc5a068cccc  # v1.3.4
-        with:
-          ref: ${{ github.sha }}
-          check-name: 'Generate SBOM & Check License Compliance'
+          running-workflow-name: 'Wait for CI Workflows'
           repo-token: ${{ secrets.GITHUB_TOKEN }}
           wait-interval: 10
 
