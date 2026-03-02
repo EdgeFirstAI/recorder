@@ -194,7 +194,8 @@ fn record_topic(
 
 fn expand_env_vars(path: &str) -> String {
     let path = if let Ok(home) = std::env::var("HOME") {
-        path.replace("$HOME", &home).replacen("~/", &format!("{home}/"), 1)
+        path.replace("$HOME", &home)
+            .replacen("~/", &format!("{home}/"), 1)
     } else {
         path.to_string()
     };
