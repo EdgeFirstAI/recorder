@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.7.1] - 2026-03-01
+
+### Added
+
+- Added STORAGE parameter to `recorder.default` with default of `$HOME/recordings`
+- Added environment variable expansion in storage path (`$HOME` and `~/` are resolved)
+
 ## [1.7.0] - 2026-02-26
 
 ### Changed

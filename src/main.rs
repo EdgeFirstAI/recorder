@@ -192,10 +192,20 @@ fn record_topic(
     }
 }
 
+fn expand_env_vars(path: &str) -> String {
+    let path = if let Ok(home) = std::env::var("HOME") {
+        path.replace("$HOME", &home).replacen("~/", &format!("{home}/"), 1)
+    } else {
+        path.to_string()
+    };
+    path
+}
+
 fn get_storage_dir() -> Result<String> {
     match std::env::var("STORAGE") {
         Err(_) => Ok(String::new()),
         Ok(storage) => {
+            let storage = expand_env_vars(&storage);
             debug!("STORAGE={storage}");
             fs::create_dir_all(&storage)
                 .with_context(|| format!("failed to create storage directory: {storage}"))?;
