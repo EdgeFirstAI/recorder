@@ -38,6 +38,17 @@ fn timestamp_nanos() -> u64 {
         .as_nanos() as u64
 }
 
+/// Extract the producer-side publish time from a Zenoh sample as nanoseconds
+/// since the UNIX epoch. Returns `None` if the sample was not source-stamped
+/// (or the timestamp is outside the representable range), in which case the
+/// caller should fall back to the recorder-side receive time.
+fn sample_publish_nanos(sample: &Sample) -> Option<u64> {
+    let ts = sample.timestamp()?;
+    let system_time = ts.get_time().to_system_time();
+    let dur = system_time.duration_since(UNIX_EPOCH).ok()?;
+    Some(dur.as_nanos() as u64)
+}
+
 fn should_exit(exit_signal: &mut BusReader<i32>) -> bool {
     match exit_signal.try_recv() {
         Ok(_) | Err(TryRecvError::Disconnected) => true,
@@ -167,13 +178,22 @@ fn record_topic(
         }
 
         let data = sample.payload().to_bytes().into_owned();
-        let timestamp_ns = timestamp_nanos();
+        let log_time = timestamp_nanos();
+        let publish_time = sample_publish_nanos(&sample).unwrap_or(log_time);
+
+        if sequence == 0 {
+            if publish_time == log_time && sample.timestamp().is_none() {
+                info!("Timestamps for {topic}: fallback to recorder receive time (publisher did not source-stamp)");
+            } else {
+                info!("Timestamps for {topic}: source-stamped from Zenoh sample");
+            }
+        }
 
         let header = MessageHeader {
             channel_id: rec.channel_id,
             sequence,
-            log_time: timestamp_ns,
-            publish_time: timestamp_ns,
+            log_time,
+            publish_time,
         };
 
         if rec.tx.send((header, data)).is_err() {
@@ -184,7 +204,7 @@ fn record_topic(
         sequence += 1;
 
         if let Some(max_secs) = rec.duration_secs {
-            if (timestamp_ns - rec.start_nanos) / NANOS_PER_SEC >= max_secs {
+            if log_time.saturating_sub(rec.start_nanos) / NANOS_PER_SEC >= max_secs {
                 debug!("Duration limit reached for {topic}");
                 break;
             }
