@@ -516,14 +516,23 @@ mod schema_registry_tests {
                 4,
                 "schema key {key} must have exactly 4 segments: schemas/<pkg>/msg/<Name>.msg",
             );
-            assert_eq!(parts[0], "schemas", "schema key {key} must start with schemas/");
-            assert_eq!(parts[2], "msg", "schema key {key} is missing the msg/ segment");
+            assert_eq!(
+                parts[0], "schemas",
+                "schema key {key} must start with schemas/"
+            );
+            assert_eq!(
+                parts[2], "msg",
+                "schema key {key} is missing the msg/ segment"
+            );
             assert!(
                 parts[3].ends_with(".msg"),
                 "schema key {key} must end with .msg",
             );
             assert!(
-                !parts[1].is_empty() && parts[1].chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_'),
+                !parts[1].is_empty()
+                    && parts[1]
+                        .chars()
+                        .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_'),
                 "package segment {} in {key} must be lower-case ROS package name",
                 parts[1],
             );
