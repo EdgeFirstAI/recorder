@@ -467,3 +467,38 @@ async fn main() -> Result<()> {
     info!("Saved MCAP to {}", filename.display());
     Ok(())
 }
+
+#[cfg(test)]
+mod schema_registry_tests {
+    use super::schemas;
+
+    /// Every embedded schema key must match `schemas/<pkg>/msg/<Name>.msg`,
+    /// because runtime lookup in `main` builds that exact key from the ROS 2
+    /// encoding string. A misplaced `.msg` file silently fails at runtime;
+    /// this test fails at `cargo test` instead.
+    #[test]
+    fn every_schema_key_matches_ros2_layout() {
+        let all = schemas::get_all();
+        assert!(!all.is_empty(), "schema registry must not be empty");
+
+        for key in all.keys() {
+            let parts: Vec<&str> = key.split('/').collect();
+            assert_eq!(
+                parts.len(),
+                4,
+                "schema key {key} must have exactly 4 segments: schemas/<pkg>/msg/<Name>.msg",
+            );
+            assert_eq!(parts[0], "schemas", "schema key {key} must start with schemas/");
+            assert_eq!(parts[2], "msg", "schema key {key} is missing the msg/ segment");
+            assert!(
+                parts[3].ends_with(".msg"),
+                "schema key {key} must end with .msg",
+            );
+            assert!(
+                !parts[1].is_empty() && parts[1].chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_'),
+                "package segment {} in {key} must be lower-case ROS package name",
+                parts[1],
+            );
+        }
+    }
+}
