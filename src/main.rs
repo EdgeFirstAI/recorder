@@ -13,7 +13,7 @@ use log::{debug, error, info, warn};
 use mcap::{records::MessageHeader, WriteOptions, Writer};
 use signal_hook::{consts::signal::*, iterator::Signals};
 use std::{
-    collections::{BTreeMap, HashMap, HashSet},
+    collections::{BTreeMap, HashSet},
     fs,
     io::BufWriter,
     path::Path,
@@ -80,15 +80,17 @@ fn write_to_file(
                 out.write_to_known_channel(&header, &data)
                     .context("failed to write message to MCAP")?;
 
-                if last_size_check.elapsed() >= check_interval {
-                    let elapsed = last_size_check.elapsed().as_secs_f64();
+                let now = Instant::now();
+                if now.duration_since(last_size_check) >= check_interval {
+                    let elapsed = now.duration_since(last_size_check).as_secs_f64();
                     let current_size = file_path
                         .metadata()
                         .context("failed to read MCAP file metadata")?
                         .len();
 
                     if last_file_size > 0 {
-                        growth_rate = (current_size - last_file_size) as f64 / elapsed;
+                        growth_rate =
+                            current_size.saturating_sub(last_file_size) as f64 / elapsed;
                     }
 
                     let available_space = get_available_space(file_path)?;
@@ -115,7 +117,7 @@ fn write_to_file(
                     }
 
                     last_file_size = current_size;
-                    last_size_check = Instant::now();
+                    last_size_check = now;
                 }
             }
             Err(_) => {
@@ -357,7 +359,7 @@ async fn main() -> Result<()> {
         }));
     }
 
-    let mut topic_encodings = HashMap::new();
+    let mut topic_encodings = BTreeMap::new();
     for task in tasks {
         let (topic, result) = task.await.context("topic resolution task panicked")?;
         match result {
@@ -457,19 +459,25 @@ async fn main() -> Result<()> {
         }));
     }
 
-    // Signal handler thread
+    // Signal handler thread: first signal triggers graceful shutdown,
+    // second signal forces exit so a wedged topic thread cannot block us.
     let bus_clone = bus.clone();
     std::thread::spawn(move || {
         let mut signals =
             Signals::new([SIGINT, SIGTERM]).expect("failed to register signal handlers");
+        let mut already_signalled = false;
         for signal in signals.forever() {
             match signal {
                 SIGINT => debug!("Received SIGINT"),
                 SIGTERM => debug!("Received SIGTERM"),
                 _ => continue,
             }
+            if already_signalled {
+                warn!("Second shutdown signal received — forcing exit");
+                std::process::exit(130);
+            }
             bus_clone.lock().unwrap().broadcast(1);
-            break;
+            already_signalled = true;
         }
     });
 
