@@ -34,7 +34,7 @@ The recorder includes schemas for the following message types:
 
 ### Prerequisites
 
-- Rust toolchain 1.70+
+- Rust toolchain 1.75+ (pinned via `rust-version` in `Cargo.toml`)
 - Running EdgeFirst Perception stack (or any Zenoh publisher)
 
 ### Installation
