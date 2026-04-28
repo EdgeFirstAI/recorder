@@ -86,6 +86,10 @@ pub struct Args {
     #[arg(long, env = "LISTEN")]
     pub listen: Vec<String>,
 
+    /// Strip the hostname prefix from MCAP channel topics
+    #[arg(long, env = "STRIP_HOSTNAME")]
+    pub strip_hostname: bool,
+
     /// Disable Zenoh multicast scouting
     #[arg(long, env = "NO_MULTICAST_SCOUTING")]
     pub no_multicast_scouting: bool,

@@ -235,21 +235,25 @@ fn get_filename() -> String {
     format!("{prefix}_{timestamp}.mcap")
 }
 
-/// Normalizes topic names to use the `rt/` prefix convention used by Zenoh
-/// for ROS 2 topic bridging.
+/// Normalizes topic names by stripping a leading `/` if present.
+/// Topics are used as Zenoh key expressions and passed through as-is.
 fn normalize_topic(topic: &str) -> String {
-    if topic.starts_with('/') {
-        format!("rt{topic}")
-    } else if !topic.starts_with("rt/") {
-        format!("rt/{topic}")
-    } else {
-        topic.to_string()
-    }
+    topic.strip_prefix('/').unwrap_or(topic).to_string()
 }
 
-/// Strips the `rt` prefix from a topic name for use as the MCAP channel topic.
-fn mcap_topic(topic: &str) -> &str {
-    topic.strip_prefix("rt").unwrap_or(topic)
+/// Derives the MCAP channel topic from a Zenoh key expression.
+///
+/// When `strip_hostname` is true, removes the first path segment (the
+/// publisher hostname) so that channel names are host-independent.
+fn mcap_topic(topic: &str, strip_hostname: bool) -> String {
+    if strip_hostname {
+        match topic.find('/') {
+            Some(idx) => topic[idx..].to_string(),
+            None => format!("/{topic}"),
+        }
+    } else {
+        format!("/{topic}")
+    }
 }
 
 async fn discover_topics(session: &Session, timeout_secs: u64) -> Result<Vec<String>> {
@@ -411,10 +415,10 @@ async fn main() -> Result<()> {
             .with_context(|| format!("failed to add schema for {encoding}"))?;
 
         let channel_id = out
-            .add_channel(schema_id, mcap_topic(topic), "cdr", &BTreeMap::default())
+            .add_channel(schema_id, &mcap_topic(topic, args.strip_hostname), "cdr", &BTreeMap::default())
             .with_context(|| format!("failed to add MCAP channel for {topic}"))?;
 
-        let frame_duration = if args.cube_fps.is_some() && topic == "rt/radar/cube" {
+        let frame_duration = if args.cube_fps.is_some() && topic.ends_with("radar/cube") {
             args.cube_fps()
                 .map(|fps| Duration::from_secs_f64(1.0 / f64::from(fps)))
         } else {
@@ -537,5 +541,39 @@ mod schema_registry_tests {
                 parts[1],
             );
         }
+    }
+}
+
+#[cfg(test)]
+mod topic_tests {
+    use super::{mcap_topic, normalize_topic};
+
+    #[test]
+    fn normalize_strips_leading_slash() {
+        assert_eq!(normalize_topic("/flight/imu"), "flight/imu");
+    }
+
+    #[test]
+    fn normalize_passthrough() {
+        assert_eq!(normalize_topic("adis-uav1/flight/imu"), "adis-uav1/flight/imu");
+    }
+
+    #[test]
+    fn mcap_topic_no_strip() {
+        assert_eq!(
+            mcap_topic("adis-uav1/flight/imu", false),
+            "/adis-uav1/flight/imu"
+        );
+    }
+
+    #[test]
+    fn mcap_topic_strip_hostname() {
+        assert_eq!(mcap_topic("adis-uav1/flight/imu", true), "/flight/imu");
+    }
+
+    #[test]
+    fn mcap_topic_single_segment() {
+        assert_eq!(mcap_topic("imu", false), "/imu");
+        assert_eq!(mcap_topic("imu", true), "/imu");
     }
 }
