@@ -46,7 +46,7 @@ fn sample_publish_nanos(sample: &Sample) -> Option<u64> {
     let ts = sample.timestamp()?;
     let system_time = ts.get_time().to_system_time();
     let dur = system_time.duration_since(UNIX_EPOCH).ok()?;
-    Some(dur.as_nanos() as u64)
+    u64::try_from(dur.as_nanos()).ok()
 }
 
 fn should_exit(exit_signal: &mut BusReader<i32>) -> bool {
@@ -181,11 +181,14 @@ fn record_topic(
 
         let data = sample.payload().to_bytes().into_owned();
         let log_time = timestamp_nanos();
-        let publish_time = sample_publish_nanos(&sample).unwrap_or(log_time);
+        let publish_time_opt = sample_publish_nanos(&sample);
+        let publish_time = publish_time_opt.unwrap_or(log_time);
 
         if sequence == 0 {
-            if publish_time == log_time && sample.timestamp().is_none() {
-                info!("Timestamps for {topic}: fallback to recorder receive time (publisher did not source-stamp)");
+            if publish_time_opt.is_none() {
+                info!(
+                    "Timestamps for {topic}: fallback to recorder receive time (missing or invalid source timestamp)"
+                );
             } else {
                 info!("Timestamps for {topic}: source-stamped from Zenoh sample");
             }
@@ -214,10 +217,21 @@ fn record_topic(
     }
 }
 
+fn expand_env_vars(path: &str) -> String {
+    let path = if let Ok(home) = std::env::var("HOME") {
+        path.replace("$HOME", &home)
+            .replacen("~/", &format!("{home}/"), 1)
+    } else {
+        path.to_string()
+    };
+    path
+}
+
 fn get_storage_dir() -> Result<String> {
     match std::env::var("STORAGE") {
         Err(_) => Ok(String::new()),
         Ok(storage) => {
+            let storage = expand_env_vars(&storage);
             debug!("STORAGE={storage}");
             fs::create_dir_all(&storage)
                 .with_context(|| format!("failed to create storage directory: {storage}"))?;
