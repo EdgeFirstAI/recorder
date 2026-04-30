@@ -89,8 +89,7 @@ fn write_to_file(
                         .len();
 
                     if last_file_size > 0 {
-                        growth_rate =
-                            current_size.saturating_sub(last_file_size) as f64 / elapsed;
+                        growth_rate = current_size.saturating_sub(last_file_size) as f64 / elapsed;
                     }
 
                     let available_space = get_available_space(file_path)?;
@@ -429,7 +428,12 @@ async fn main() -> Result<()> {
             .with_context(|| format!("failed to add schema for {encoding}"))?;
 
         let channel_id = out
-            .add_channel(schema_id, &mcap_topic(topic, args.strip_hostname), "cdr", &BTreeMap::default())
+            .add_channel(
+                schema_id,
+                &mcap_topic(topic, args.strip_hostname),
+                "cdr",
+                &BTreeMap::default(),
+            )
             .with_context(|| format!("failed to add MCAP channel for {topic}"))?;
 
         let frame_duration = if args.cube_fps.is_some() && topic.ends_with("radar/cube") {
@@ -569,7 +573,10 @@ mod topic_tests {
 
     #[test]
     fn normalize_passthrough() {
-        assert_eq!(normalize_topic("adis-uav1/flight/imu"), "adis-uav1/flight/imu");
+        assert_eq!(
+            normalize_topic("adis-uav1/flight/imu"),
+            "adis-uav1/flight/imu"
+        );
     }
 
     #[test]
