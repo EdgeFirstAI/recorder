@@ -7,6 +7,50 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- MCAP `publish_time` is now taken from the Zenoh sample timestamp when the
+  publisher source-stamps messages, with a documented fallback to the
+  recorder-side receive time. The recorder logs which mode each topic is
+  using on its first sample (EDGEAI-1236).
+- Schema registry round-trip test (`every_schema_key_matches_ros2_layout`)
+  fails `cargo test` if any embedded `.msg` file is placed outside the
+  canonical `schemas/<pkg>/msg/<Name>.msg` layout (EDGEAI-1236).
+- `ARCHITECTURE.md` now documents the schema-addition workflow and the
+  recorder's time model.
+
+### Changed
+
+- Bumped dependencies to current upstream versions: zenoh 1.4.0 → 1.9.0,
+  mcap 0.18.0 → 0.24.0, clap 4.5 → 4.6, tokio 1.45 → 1.52, signal-hook
+  0.3 → 0.4, plus minor bumps across the rest of the tree. Pinned MSRV
+  at `rust-version = "1.75"` (EDGEAI-1236).
+- Topic encodings are now kept in a `BTreeMap`, so MCAP channel IDs are
+  deterministic across runs (EDGEAI-1236).
+- SIGINT/SIGTERM handler is now two-strike: the second signal forces
+  `exit(130)` rather than waiting on a potentially wedged topic thread
+  (EDGEAI-1236).
+- Writer growth-rate check uses `saturating_sub` and a single
+  `Instant::now()` per iteration; duration-limit check also uses
+  `saturating_sub` to survive NTP backward jumps (EDGEAI-1236).
+- Rebranded `CONTRIBUTING.md` to "EdgeFirst Recorder"; fixed the
+  non-existent `cargo test --coverage` invocation; aligned coverage
+  guidance with what CI actually enforces (EDGEAI-1236).
+
+### Fixed
+
+- `visualization_msgs/Marker` was stored without the `msg/` path segment,
+  so the runtime schema lookup never matched and the topic was silently
+  dropped even though it was advertised as supported. Moved the file to
+  `src/schemas/visualization_msgs/msg/Marker.msg` (EDGEAI-1236).
+- `build.rs` now emits `cargo:rerun-if-changed=src/schemas`, so edits to
+  existing `.msg` files trigger regeneration of `src/schemas.rs`
+  (EDGEAI-1236).
+- `recorder.default` CUBE_FPS comment now matches the implementation
+  ("empty = native rate", not "empty = skip") (EDGEAI-1236).
+- Dropped the incorrect `Cargo.lock` entry from `.gitignore`; this is a
+  binary crate and the lockfile is committed (EDGEAI-1236).
+
 ## [1.7.1] - 2026-03-01
 
 ### Added

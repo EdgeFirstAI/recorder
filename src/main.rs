@@ -13,7 +13,7 @@ use log::{debug, error, info, warn};
 use mcap::{records::MessageHeader, WriteOptions, Writer};
 use signal_hook::{consts::signal::*, iterator::Signals};
 use std::{
-    collections::{BTreeMap, HashMap, HashSet},
+    collections::{BTreeMap, HashSet},
     fs,
     io::BufWriter,
     path::Path,
@@ -36,6 +36,17 @@ fn timestamp_nanos() -> u64 {
         .duration_since(UNIX_EPOCH)
         .expect("system clock before UNIX epoch")
         .as_nanos() as u64
+}
+
+/// Extract the producer-side publish time from a Zenoh sample as nanoseconds
+/// since the UNIX epoch. Returns `None` if the sample was not source-stamped
+/// (or the timestamp is outside the representable range), in which case the
+/// caller should fall back to the recorder-side receive time.
+fn sample_publish_nanos(sample: &Sample) -> Option<u64> {
+    let ts = sample.timestamp()?;
+    let system_time = ts.get_time().to_system_time();
+    let dur = system_time.duration_since(UNIX_EPOCH).ok()?;
+    u64::try_from(dur.as_nanos()).ok()
 }
 
 fn should_exit(exit_signal: &mut BusReader<i32>) -> bool {
@@ -69,15 +80,16 @@ fn write_to_file(
                 out.write_to_known_channel(&header, &data)
                     .context("failed to write message to MCAP")?;
 
-                if last_size_check.elapsed() >= check_interval {
-                    let elapsed = last_size_check.elapsed().as_secs_f64();
+                let now = Instant::now();
+                if now.duration_since(last_size_check) >= check_interval {
+                    let elapsed = now.duration_since(last_size_check).as_secs_f64();
                     let current_size = file_path
                         .metadata()
                         .context("failed to read MCAP file metadata")?
                         .len();
 
                     if last_file_size > 0 {
-                        growth_rate = (current_size - last_file_size) as f64 / elapsed;
+                        growth_rate = current_size.saturating_sub(last_file_size) as f64 / elapsed;
                     }
 
                     let available_space = get_available_space(file_path)?;
@@ -104,7 +116,7 @@ fn write_to_file(
                     }
 
                     last_file_size = current_size;
-                    last_size_check = Instant::now();
+                    last_size_check = now;
                 }
             }
             Err(_) => {
@@ -167,13 +179,25 @@ fn record_topic(
         }
 
         let data = sample.payload().to_bytes().into_owned();
-        let timestamp_ns = timestamp_nanos();
+        let log_time = timestamp_nanos();
+        let publish_time_opt = sample_publish_nanos(&sample);
+        let publish_time = publish_time_opt.unwrap_or(log_time);
+
+        if sequence == 0 {
+            if publish_time_opt.is_none() {
+                info!(
+                    "Timestamps for {topic}: fallback to recorder receive time (missing or invalid source timestamp)"
+                );
+            } else {
+                info!("Timestamps for {topic}: source-stamped from Zenoh sample");
+            }
+        }
 
         let header = MessageHeader {
             channel_id: rec.channel_id,
             sequence,
-            log_time: timestamp_ns,
-            publish_time: timestamp_ns,
+            log_time,
+            publish_time,
         };
 
         if rec.tx.send((header, data)).is_err() {
@@ -184,7 +208,7 @@ fn record_topic(
         sequence += 1;
 
         if let Some(max_secs) = rec.duration_secs {
-            if (timestamp_ns - rec.start_nanos) / NANOS_PER_SEC >= max_secs {
+            if log_time.saturating_sub(rec.start_nanos) / NANOS_PER_SEC >= max_secs {
                 debug!("Duration limit reached for {topic}");
                 break;
             }
@@ -224,21 +248,25 @@ fn get_filename() -> String {
     format!("{prefix}_{timestamp}.mcap")
 }
 
-/// Normalizes topic names to use the `rt/` prefix convention used by Zenoh
-/// for ROS 2 topic bridging.
+/// Normalizes topic names by stripping a leading `/` if present.
+/// Topics are used as Zenoh key expressions and passed through as-is.
 fn normalize_topic(topic: &str) -> String {
-    if topic.starts_with('/') {
-        format!("rt{topic}")
-    } else if !topic.starts_with("rt/") {
-        format!("rt/{topic}")
-    } else {
-        topic.to_string()
-    }
+    topic.strip_prefix('/').unwrap_or(topic).to_string()
 }
 
-/// Strips the `rt` prefix from a topic name for use as the MCAP channel topic.
-fn mcap_topic(topic: &str) -> &str {
-    topic.strip_prefix("rt").unwrap_or(topic)
+/// Derives the MCAP channel topic from a Zenoh key expression.
+///
+/// When `strip_hostname` is true, removes the first path segment (the
+/// publisher hostname) so that channel names are host-independent.
+fn mcap_topic(topic: &str, strip_hostname: bool) -> String {
+    if strip_hostname {
+        match topic.find('/') {
+            Some(idx) => topic[idx..].to_string(),
+            None => format!("/{topic}"),
+        }
+    } else {
+        format!("/{topic}")
+    }
 }
 
 async fn discover_topics(session: &Session, timeout_secs: u64) -> Result<Vec<String>> {
@@ -348,7 +376,7 @@ async fn main() -> Result<()> {
         }));
     }
 
-    let mut topic_encodings = HashMap::new();
+    let mut topic_encodings = BTreeMap::new();
     for task in tasks {
         let (topic, result) = task.await.context("topic resolution task panicked")?;
         match result {
@@ -400,10 +428,15 @@ async fn main() -> Result<()> {
             .with_context(|| format!("failed to add schema for {encoding}"))?;
 
         let channel_id = out
-            .add_channel(schema_id, mcap_topic(topic), "cdr", &BTreeMap::default())
+            .add_channel(
+                schema_id,
+                &mcap_topic(topic, args.strip_hostname),
+                "cdr",
+                &BTreeMap::default(),
+            )
             .with_context(|| format!("failed to add MCAP channel for {topic}"))?;
 
-        let frame_duration = if args.cube_fps.is_some() && topic == "rt/radar/cube" {
+        let frame_duration = if args.cube_fps.is_some() && topic.ends_with("radar/cube") {
             args.cube_fps()
                 .map(|fps| Duration::from_secs_f64(1.0 / f64::from(fps)))
         } else {
@@ -448,19 +481,25 @@ async fn main() -> Result<()> {
         }));
     }
 
-    // Signal handler thread
+    // Signal handler thread: first signal triggers graceful shutdown,
+    // second signal forces exit so a wedged topic thread cannot block us.
     let bus_clone = bus.clone();
     std::thread::spawn(move || {
         let mut signals =
             Signals::new([SIGINT, SIGTERM]).expect("failed to register signal handlers");
+        let mut already_signalled = false;
         for signal in signals.forever() {
             match signal {
                 SIGINT => debug!("Received SIGINT"),
                 SIGTERM => debug!("Received SIGTERM"),
                 _ => continue,
             }
+            if already_signalled {
+                warn!("Second shutdown signal received — forcing exit");
+                std::process::exit(130);
+            }
             bus_clone.lock().unwrap().broadcast(1);
-            break;
+            already_signalled = true;
         }
     });
 
@@ -477,4 +516,85 @@ async fn main() -> Result<()> {
 
     info!("Saved MCAP to {}", filename.display());
     Ok(())
+}
+
+#[cfg(test)]
+mod schema_registry_tests {
+    use super::schemas;
+
+    /// Every embedded schema key must match `schemas/<pkg>/msg/<Name>.msg`,
+    /// because runtime lookup in `main` builds that exact key from the ROS 2
+    /// encoding string. A misplaced `.msg` file silently fails at runtime;
+    /// this test fails at `cargo test` instead.
+    #[test]
+    fn every_schema_key_matches_ros2_layout() {
+        let all = schemas::get_all();
+        assert!(!all.is_empty(), "schema registry must not be empty");
+
+        for key in all.keys() {
+            let parts: Vec<&str> = key.split('/').collect();
+            assert_eq!(
+                parts.len(),
+                4,
+                "schema key {key} must have exactly 4 segments: schemas/<pkg>/msg/<Name>.msg",
+            );
+            assert_eq!(
+                parts[0], "schemas",
+                "schema key {key} must start with schemas/"
+            );
+            assert_eq!(
+                parts[2], "msg",
+                "schema key {key} is missing the msg/ segment"
+            );
+            assert!(
+                parts[3].ends_with(".msg"),
+                "schema key {key} must end with .msg",
+            );
+            assert!(
+                !parts[1].is_empty()
+                    && parts[1]
+                        .chars()
+                        .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_'),
+                "package segment {} in {key} must be lower-case ROS package name",
+                parts[1],
+            );
+        }
+    }
+}
+
+#[cfg(test)]
+mod topic_tests {
+    use super::{mcap_topic, normalize_topic};
+
+    #[test]
+    fn normalize_strips_leading_slash() {
+        assert_eq!(normalize_topic("/flight/imu"), "flight/imu");
+    }
+
+    #[test]
+    fn normalize_passthrough() {
+        assert_eq!(
+            normalize_topic("adis-uav1/flight/imu"),
+            "adis-uav1/flight/imu"
+        );
+    }
+
+    #[test]
+    fn mcap_topic_no_strip() {
+        assert_eq!(
+            mcap_topic("adis-uav1/flight/imu", false),
+            "/adis-uav1/flight/imu"
+        );
+    }
+
+    #[test]
+    fn mcap_topic_strip_hostname() {
+        assert_eq!(mcap_topic("adis-uav1/flight/imu", true), "/flight/imu");
+    }
+
+    #[test]
+    fn mcap_topic_single_segment() {
+        assert_eq!(mcap_topic("imu", false), "/imu");
+        assert_eq!(mcap_topic("imu", true), "/imu");
+    }
 }

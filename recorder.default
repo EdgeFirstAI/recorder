@@ -54,11 +54,11 @@ TOPICS=""
 # Radar Cube FPS Limit
 # ---------------------------------------------------------------------------
 # Limit the frame rate of the radar cube topic to reduce file size. Set to a
-# positive integer for the desired FPS, or leave empty to skip the radar cube
-# topic entirely. Use "MAX" on the command line to record at native rate (this
-# cannot be expressed as an environment variable — omit CUBE_FPS to skip, or
-# set a numeric value to limit).
-CUBE_FPS="1"
+# positive integer for the desired FPS to throttle the cube to that rate.
+# Leave empty to record the radar cube at its native publish rate (no rate
+# limiting). "MAX" is a CLI-only synonym for the native rate and cannot be
+# expressed via this environment variable.
+CUBE_FPS=""
 
 # ---------------------------------------------------------------------------
 # Zenoh Networking

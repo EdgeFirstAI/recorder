@@ -173,6 +173,41 @@ flowchart LR
 
 At runtime, the recorder resolves each topic's encoding from the first received Zenoh sample, looks up the corresponding `.msg` schema, and registers it with the MCAP writer. Topics without a matching schema are skipped.
 
+### Adding a Topic / Schema
+
+Adding support for a new ROS 2 message type is a single file drop, but the layout contract is strict because the runtime lookup is implicit.
+
+**1. Drop the `.msg` file at the canonical path.**
+
+```
+src/schemas/<ros_package>/msg/<TypeName>.msg
+```
+
+For example, `sensor_msgs/msg/Image` lives at `src/schemas/sensor_msgs/msg/Image.msg`. The path segments must be lower-case ROS package name, literal `msg`, then the `PascalCase` type name with a `.msg` extension.
+
+**2. No registration step.**
+
+`build.rs` walks `src/schemas/` with `include_walk` and regenerates `src/schemas.rs` on every build. A `cargo:rerun-if-changed=src/schemas` directive ensures edits to existing `.msg` files also trigger regeneration.
+
+**3. The implicit contract with Zenoh.**
+
+At runtime the recorder asks the first sample for its encoding (e.g. `sensor_msgs/msg/Image`) and looks up the schema with the key `schemas/<encoding>.msg`. **If a `.msg` file is placed at a non-canonical location (e.g. missing the `msg/` segment), the runtime lookup will silently fail and the topic will be skipped with a warning.**
+
+**4. Verification.**
+
+- `cargo test` runs a round-trip assertion (`schema_registry_tests::every_schema_key_matches_ros2_layout`) that every embedded key matches the expected layout. Misplaced files fail the test instead of reaching production.
+- Also update the "Supported Topics" table in `README.md`.
+- End-to-end: record a live publisher for the new type and confirm the MCAP channel appears in Foxglove Studio with the correct schema.
+
+### Time
+
+MCAP records two timestamps per message. The recorder sets them as follows:
+
+- **`log_time`** — when the recorder observed the sample (`SystemTime::now()` at receive time). This is the MCAP convention.
+- **`publish_time`** — taken from the Zenoh sample timestamp (`sample.timestamp()`) when the publisher source-stamped the message, and falls back to `log_time` otherwise. The recorder logs which mode was used on the first sample of each topic, so field debugging never has to guess which clock the MCAP reflects.
+
+Source-stamping requires the publisher to attach a Zenoh timestamp (e.g. via `put(..., timestamp=...)`); without it, `publish_time == log_time` and the MCAP loses producer-side timing but remains playable.
+
 ---
 
 ## Key Design Decisions
@@ -201,3 +236,7 @@ At runtime, the recorder resolves each topic's encoding from the first received 
 | `fs2` | Disk space queries |
 | `signal-hook` | Unix signal handling |
 | `chrono` | Timestamp formatting for filenames |
+| `log`, `env_logger` | Logging facade and environment-driven logger |
+| `hostname` | Host name lookup for MCAP filenames |
+| `serde_json` | Zenoh configuration JSON5 snippets |
+| `include_walk` (build-dep) | Compile-time schema discovery |

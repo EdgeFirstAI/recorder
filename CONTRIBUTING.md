@@ -1,6 +1,6 @@
-# Contributing to Maivin Recorder
+# Contributing to EdgeFirst Recorder
 
-Thank you for your interest in contributing to Maivin Recorder! This document provides guidelines for contributing to this project.
+Thank you for your interest in contributing to EdgeFirst Recorder! This document provides guidelines for contributing to this project.
 
 ## Table of Contents
 
@@ -20,7 +20,7 @@ This project adheres to the [Contributor Covenant Code of Conduct](CODE_OF_CONDU
 
 ## Getting Started
 
-Maivin Recorder is an MCAP data recording ROS 2 node for the EdgeFirst Maivin platform. Before contributing:
+EdgeFirst Recorder is an MCAP data recording node for the EdgeFirst Perception stack, bridging Zenoh topics to self-describing MCAP files for offline analysis. Before contributing:
 
 1. Read the [README.md](README.md) to understand the project
 2. Browse the [EdgeFirst Documentation](https://doc.edgefirst.ai/latest/maivin/) for context
@@ -31,8 +31,7 @@ Maivin Recorder is an MCAP data recording ROS 2 node for the EdgeFirst Maivin pl
 
 ### Prerequisites
 
-- **Rust**: 1.70 or later ([install instructions](https://rustup.rs/))
-- **ROS 2**: Humble or later
+- **Rust**: 1.75 or later (pinned via `rust-version` in `Cargo.toml`; [install instructions](https://rustup.rs/))
 - **Git**: For version control
 
 ### Clone and Build
@@ -91,17 +90,21 @@ Before creating bug reports, please check existing issues to avoid duplicates.
 
 ## Testing Requirements
 
-All contributions with new functionality must include tests:
-
-- **Unit Tests**: Minimum 70% code coverage
-- Critical paths require 100% coverage
+All contributions with new functionality should include tests. Coverage is
+measured but not gated in CI today; target ~70 % overall with full coverage
+on critical paths (topic normalisation, timestamp extraction, schema
+registry).
 
 ### Running Tests
 
 ```bash
-cargo test              # Run all tests
-cargo test --coverage   # Generate coverage report
+cargo test              # Run the unit test suite
+make test               # Runs cargo-nextest under cargo-llvm-cov and
+                        # writes target/rust-coverage.lcov
 ```
+
+See [TESTING.md](TESTING.md) for the Foxglove-based manual verification
+workflow that complements unit tests.
 
 ## Pull Request Process
 
@@ -157,7 +160,7 @@ git config user.email "your.email@example.com"
 
 ## License
 
-By contributing to Maivin Recorder, you agree that your contributions will be licensed under the [Apache License 2.0](LICENSE).
+By contributing to EdgeFirst Recorder, you agree that your contributions will be licensed under the [Apache License 2.0](LICENSE).
 
 All source files must include the SPDX license header:
 
@@ -173,4 +176,4 @@ All source files must include the SPDX license header:
 - **Issues**: https://github.com/EdgeFirstAI/recorder/issues
 - **Email**: support@au-zone.com
 
-Thank you for helping make Maivin Recorder better!
+Thank you for helping make EdgeFirst Recorder better!

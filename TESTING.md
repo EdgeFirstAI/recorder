@@ -176,7 +176,7 @@ Manual Foxglove verification is performed before each release using the workflow
 |---------|-------|-----|
 | No topics discovered | Zenoh publishers not running | Start the EdgeFirst Perception stack |
 | Topic skipped: no data | Publisher started after discovery timeout | Increase `--timeout` or specify topics explicitly |
-| Topic skipped: no schema | Unknown message encoding | Add the `.msg` schema to `src/schemas/` |
+| Topic skipped: no schema | Unknown message encoding | Add the `.msg` schema — see [ARCHITECTURE.md § Adding a Topic / Schema](ARCHITECTURE.md#adding-a-topic--schema) |
 | MCAP won't open in Foxglove | File not finalized (crash/kill -9) | Re-record; use SIGINT for clean shutdown |
 | Large file size | Uncompressed radar cube data | Use `--compression zstd` and `--cube-fps 5` |
 | Low storage shutdown | Disk filling during recording | Free disk space or use `STORAGE` to point to larger volume |
