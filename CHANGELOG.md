@@ -5,10 +5,25 @@ All notable changes to EdgeFirst Recorder will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [1.8.0] - 2026-04-30
 
 ### Added
 
+- **37 new schema definitions** bringing the total to 53 supported ROS 2
+  message types for MCAP recording with full sub-message inlining:
+  - `geometry_msgs`: PointStamped, Vector3Stamped, QuaternionStamped,
+    PoseStamped, WrenchStamped, AccelStamped, InertiaStamped,
+    PoseWithCovarianceStamped, TwistWithCovarianceStamped,
+    AccelWithCovarianceStamped, PolygonStamped, PoseArray,
+    TwistStamped, TransformStamped
+  - `mavros_msgs`: Altitude, VfrHud, EstimatorStatus, ExtendedState,
+    SysStatus, State, StatusText, GPSRAW, TimesyncStatus
+  - `sensor_msgs`: BatteryState, FluidPressure, MagneticField, Temperature
+  - `nav_msgs`: Odometry
+  - `edgefirst_msgs`: Box, CameraFrame, CameraPlane, Date, Track, Vibration
+  - `foxglove_msgs`: CompressedImage, CompressedVideo (fixed missing Time)
+- `--strip-hostname` CLI flag / `STRIP_HOSTNAME` env var to optionally
+  strip the hostname prefix from MCAP topic names (EDGEAI-1236).
 - MCAP `publish_time` is now taken from the Zenoh sample timestamp when the
   publisher source-stamps messages, with a documented fallback to the
   recorder-side receive time. The recorder logs which mode each topic is
@@ -21,6 +36,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Topic convention**: replaced `rt/` prefix with hostname-based topic
+  convention. Topics are now recorded as-is (e.g. `/adis-uav1/flight/imu`).
+  The old `rt/` prefix from zenoh-plugin-ros2dds is no longer added
+  (EDGEAI-1236).
 - Bumped dependencies to current upstream versions: zenoh 1.4.0 → 1.9.0,
   mcap 0.18.0 → 0.24.0, clap 4.5 → 4.6, tokio 1.45 → 1.52, signal-hook
   0.3 → 0.4, plus minor bumps across the rest of the tree. Pinned MSRV
