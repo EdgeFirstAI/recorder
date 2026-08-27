@@ -23,6 +23,13 @@ The tests cover CLI argument parsing and validation:
 
 | Test | Validates |
 |------|-----------|
+| `parse_duration_empty` | Empty string means unlimited duration |
+| `parse_duration_valid` | Numeric duration values parse correctly |
+| `parse_duration_invalid` | Non-numeric duration strings are rejected |
+| `duration_zero_is_none` | Empty/unset duration resolves to unlimited |
+| `topics_empty_from_default` | No topics triggers discover-all mode |
+| `topics_empty_string_filtered` | `TOPICS=""` env override is treated as unset |
+| `topics_positional` | Positional topic arguments parse correctly |
 | `parse_fps_max` | `MAX` (case-insensitive) parses to native rate |
 | `parse_fps_valid` | Numeric FPS values parse correctly |
 | `parse_fps_zero_rejected` | Zero is rejected as invalid FPS |
@@ -56,7 +63,7 @@ This is the primary testing workflow. It validates that the recorder correctly c
 **Record all active topics for 30 seconds:**
 
 ```bash
-edgefirst-recorder --all-topics --duration 30
+edgefirst-recorder --duration 30
 ```
 
 **Or record specific topics:**
@@ -109,9 +116,9 @@ The recorder logs each discovered topic and its encoding:
 Record with each compression option and verify the MCAP opens correctly:
 
 ```bash
-edgefirst-recorder --all-topics --duration 10 --compression none
-edgefirst-recorder --all-topics --duration 10 --compression lz4
-edgefirst-recorder --all-topics --duration 10 --compression zstd
+edgefirst-recorder --duration 10 --compression none
+edgefirst-recorder --duration 10 --compression lz4
+edgefirst-recorder --duration 10 --compression zstd
 ```
 
 Compare file sizes to validate compression is applied.
@@ -131,7 +138,7 @@ In Foxglove, verify the cube topic message rate matches the specified FPS.
 ### Duration Limiting
 
 ```bash
-edgefirst-recorder --all-topics --duration 5
+edgefirst-recorder --duration 5
 ```
 
 Verify the recorder stops after approximately 5 seconds and the MCAP file is properly finalized.
@@ -139,7 +146,7 @@ Verify the recorder stops after approximately 5 seconds and the MCAP file is pro
 ### Storage Directory
 
 ```bash
-STORAGE=/tmp/test-recordings edgefirst-recorder --all-topics --duration 5
+STORAGE=/tmp/test-recordings edgefirst-recorder --duration 5
 ls /tmp/test-recordings/*.mcap
 ```
 
@@ -149,10 +156,10 @@ Verify the file is created in the specified directory.
 
 ```bash
 # Client mode connecting to a specific router
-edgefirst-recorder --all-topics --mode client --connect tcp/192.168.1.100:7447
+edgefirst-recorder --mode client --connect tcp/192.168.1.100:7447
 
 # Disable multicast scouting
-edgefirst-recorder --all-topics --no-multicast-scouting --connect tcp/localhost:7447
+edgefirst-recorder --no-multicast-scouting --connect tcp/localhost:7447
 ```
 
 ---

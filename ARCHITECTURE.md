@@ -87,7 +87,7 @@ sequenceDiagram
     CLI->>MAIN: Parse arguments
     MAIN->>ZENOH: Open session
 
-    alt --all-topics
+    alt No topics specified
         MAIN->>ZENOH: Wildcard subscriber (**)
         ZENOH-->>MAIN: Discovered topics
     else Explicit topics

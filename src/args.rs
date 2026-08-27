@@ -36,22 +36,27 @@ impl From<Compression> for Option<mcap::Compression> {
 /// Zenoh configuration. Arguments can be specified via command line or
 /// environment variables.
 ///
+/// Empty-string environment variables (e.g. `DURATION=""`, `TOPICS=""`) are
+/// treated as unset so that systemd EnvironmentFile defaults work without
+/// commenting out optional parameters. When no topics are specified, all
+/// active Zenoh topics are discovered and recorded.
+///
 /// # Example
 ///
 /// ```bash
-/// # Via command line
-/// edgefirst-recorder --duration 60 --compression lz4 --all-topics
+/// # Record all active topics for 60 seconds
+/// edgefirst-recorder --duration 60 --compression lz4
 ///
 /// # Via environment variables
 /// export DURATION=60
 /// export COMPRESSION=lz4
-/// edgefirst-recorder --all-topics
+/// edgefirst-recorder
 /// ```
 #[derive(Parser, Debug, Clone)]
 #[command(author, version, about, long_about = None)]
 pub struct Args {
-    /// Duration for the recording in seconds
-    #[arg(short, long, env = "DURATION")]
+    /// Duration for the recording in seconds (empty = unlimited)
+    #[arg(short, long, env = "DURATION", value_parser = parse_duration)]
     pub duration: Option<u64>,
 
     /// Topic detection timeout in seconds
@@ -62,13 +67,9 @@ pub struct Args {
     #[arg(env = "COMPRESSION", short = 'z', long, value_enum, default_value_t = Compression::None)]
     pub compression: Compression,
 
-    /// Topics to record (space-delimited)
+    /// Topics to record (space-delimited). When empty, all active topics are recorded.
     #[arg(env = "TOPICS", required = false, value_delimiter = ' ')]
     pub topics: Vec<String>,
-
-    /// Discover and record all available topics
-    #[arg(short, long)]
-    pub all_topics: bool,
 
     /// Limit the frame rate of the radar cube topic. Use 'MAX' for native rate.
     #[arg(long, env = "CUBE_FPS", value_parser = parse_fps)]
@@ -91,7 +92,14 @@ pub struct Args {
     pub strip_hostname: bool,
 
     /// Disable Zenoh multicast scouting
-    #[arg(long, env = "NO_MULTICAST_SCOUTING")]
+    #[arg(
+        long,
+        env = "NO_MULTICAST_SCOUTING",
+        default_value = "false",
+        default_missing_value = "true",
+        num_args(0..=1),
+        value_parser = parse_bool
+    )]
     pub no_multicast_scouting: bool,
 }
 
@@ -103,15 +111,17 @@ impl From<Args> for Config {
             .insert_json5("mode", &json!(args.mode).to_string())
             .unwrap();
 
-        if !args.connect.is_empty() {
+        let connect: Vec<_> = args.connect.into_iter().filter(|s| !s.is_empty()).collect();
+        if !connect.is_empty() {
             config
-                .insert_json5("connect/endpoints", &json!(args.connect).to_string())
+                .insert_json5("connect/endpoints", &json!(connect).to_string())
                 .unwrap();
         }
 
-        if !args.listen.is_empty() {
+        let listen: Vec<_> = args.listen.into_iter().filter(|s| !s.is_empty()).collect();
+        if !listen.is_empty() {
             config
-                .insert_json5("listen/endpoints", &json!(args.listen).to_string())
+                .insert_json5("listen/endpoints", &json!(listen).to_string())
                 .unwrap();
         }
 
@@ -126,6 +136,30 @@ impl From<Args> for Config {
             .unwrap();
 
         config
+    }
+}
+
+fn parse_duration(s: &str) -> Result<u64, String> {
+    if s.is_empty() {
+        return Ok(0);
+    }
+
+    let secs: u64 = s
+        .parse()
+        .map_err(|_| "expected a positive integer".to_string())?;
+
+    if secs == 0 {
+        Err("duration must be greater than 0".to_string())
+    } else {
+        Ok(secs)
+    }
+}
+
+fn parse_bool(s: &str) -> Result<bool, String> {
+    match s.to_ascii_lowercase().as_str() {
+        "" | "false" | "0" | "no" => Ok(false),
+        "true" | "1" | "yes" => Ok(true),
+        other => Err(format!("invalid boolean value '{other}'")),
     }
 }
 
@@ -146,17 +180,98 @@ fn parse_fps(s: &str) -> Result<u32, String> {
 }
 
 impl Args {
+    pub fn duration(&self) -> Option<u64> {
+        match self.duration {
+            Some(0) => None,
+            other => other,
+        }
+    }
+
     pub fn cube_fps(&self) -> Option<u32> {
         match self.cube_fps {
             Some(0) => None,
             other => other,
         }
     }
+
+    /// Topics with empty strings removed (from `TOPICS=""` env overrides).
+    pub fn topics(&self) -> Vec<String> {
+        self.topics
+            .iter()
+            .filter(|t| !t.is_empty())
+            .cloned()
+            .collect()
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn parse_duration_empty() {
+        assert_eq!(parse_duration("").unwrap(), 0);
+    }
+
+    #[test]
+    fn parse_duration_valid() {
+        assert_eq!(parse_duration("60").unwrap(), 60);
+        assert_eq!(parse_duration("1").unwrap(), 1);
+    }
+
+    #[test]
+    fn parse_duration_zero_rejected() {
+        assert!(parse_duration("0").is_err());
+    }
+
+    #[test]
+    fn parse_duration_invalid() {
+        assert!(parse_duration("abc").is_err());
+    }
+
+    #[test]
+    fn duration_zero_is_none() {
+        let args = Args::parse_from(["test", "--duration", ""]);
+        assert_eq!(args.duration(), None);
+    }
+
+    #[test]
+    fn duration_value() {
+        let args = Args::parse_from(["test", "--duration", "60"]);
+        assert_eq!(args.duration(), Some(60));
+    }
+
+    #[test]
+    fn topics_empty_from_default() {
+        let args = Args::parse_from(["test"]);
+        assert!(args.topics().is_empty());
+    }
+
+    #[test]
+    fn topics_positional() {
+        let args = Args::parse_from(["test", "rt/camera/h264", "rt/radar/cube"]);
+        assert_eq!(
+            args.topics(),
+            vec!["rt/camera/h264".to_string(), "rt/radar/cube".to_string()]
+        );
+    }
+
+    #[test]
+    fn topics_empty_string_filtered() {
+        let args = Args {
+            duration: None,
+            timeout: 5,
+            compression: Compression::None,
+            topics: vec!["".to_string()],
+            cube_fps: None,
+            mode: WhatAmI::Peer,
+            connect: vec![],
+            listen: vec![],
+            strip_hostname: false,
+            no_multicast_scouting: false,
+        };
+        assert!(args.topics().is_empty());
+    }
 
     #[test]
     fn parse_fps_max() {
@@ -190,13 +305,39 @@ mod tests {
 
     #[test]
     fn cube_fps_zero_is_none() {
-        let args = Args::parse_from(["test", "--cube-fps", "MAX", "--all-topics"]);
+        let args = Args::parse_from(["test", "--cube-fps", "MAX"]);
         assert_eq!(args.cube_fps(), None);
     }
 
     #[test]
     fn cube_fps_value() {
-        let args = Args::parse_from(["test", "--cube-fps", "10", "--all-topics"]);
+        let args = Args::parse_from(["test", "--cube-fps", "10"]);
         assert_eq!(args.cube_fps(), Some(10));
+    }
+
+    #[test]
+    fn parse_bool_empty() {
+        assert!(!parse_bool("").unwrap());
+    }
+
+    #[test]
+    fn no_multicast_scouting_as_flag() {
+        let args = Args::parse_from(["test", "--no-multicast-scouting"]);
+        assert!(args.no_multicast_scouting);
+    }
+
+    #[test]
+    fn no_multicast_scouting_explicit_false() {
+        let args = Args::parse_from(["test", "--no-multicast-scouting", "false"]);
+        assert!(!args.no_multicast_scouting);
+    }
+
+    #[test]
+    fn connect_empty_filtered() {
+        let connect: Vec<_> = vec!["".to_string(), "tcp/localhost:7447".to_string()]
+            .into_iter()
+            .filter(|s| !s.is_empty())
+            .collect();
+        assert_eq!(connect, vec!["tcp/localhost:7447".to_string()]);
     }
 }

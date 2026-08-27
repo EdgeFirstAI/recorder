@@ -57,34 +57,34 @@ cross build --target aarch64-unknown-linux-gnu --release
 
 ### Basic Usage
 
+**Record all active topics (default):**
+
+```bash
+edgefirst-recorder
+```
+
 **Record specific topics:**
 
 ```bash
 edgefirst-recorder /camera/image /radar/targets /detect
 ```
 
-**Discover and record all active topics:**
-
-```bash
-edgefirst-recorder --all-topics
-```
-
 **Record for 30 seconds with Zstd compression:**
 
 ```bash
-edgefirst-recorder --all-topics --duration 30 --compression zstd
+edgefirst-recorder --duration 30 --compression zstd
 ```
 
 **Limit radar cube recording to 5 FPS:**
 
 ```bash
-edgefirst-recorder --all-topics --cube-fps 5
+edgefirst-recorder --cube-fps 5
 ```
 
 **Save to a specific directory:**
 
 ```bash
-STORAGE=/data/recordings edgefirst-recorder --all-topics
+STORAGE=/data/recordings edgefirst-recorder
 ```
 
 ### Viewing Recordings
@@ -99,9 +99,8 @@ Open the generated `.mcap` file in [Foxglove Studio](https://foxglove.dev/):
 
 | Option | Env Var | Default | Description |
 |--------|---------|---------|-------------|
-| `<TOPICS>` | `TOPICS` | | Space-delimited topics to record |
-| `-a, --all-topics` | | | Discover and record all active topics |
-| `-d, --duration` | `DURATION` | | Recording duration in seconds |
+| `<TOPICS>` | `TOPICS` | (all) | Space-delimited topics to record; empty = all active topics |
+| `-d, --duration` | `DURATION` | | Recording duration in seconds (empty = unlimited) |
 | `-t, --timeout` | | `5` | Topic discovery timeout in seconds |
 | `-z, --compression` | `COMPRESSION` | `none` | Compression: `none`, `lz4`, `zstd` |
 | `--cube-fps` | `CUBE_FPS` | | Radar cube FPS limit (`MAX` for native rate) |
