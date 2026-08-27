@@ -6,6 +6,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
+
+### Fixed
+
+- Handle empty-string environment variables in `recorder.default` (e.g. `DURATION=""`, `TOPICS=""`, `CONNECT=""`, `LISTEN=""`) so systemd EnvironmentFile defaults do not crash startup
+
+### Changed
+
+- **Breaking:** Removed `--all-topics` (`-a`); omitting topics now discovers and records all active Zenoh topics by default
+
 ## [1.8.0] - 2026-04-30
 
 ### Added
@@ -71,13 +80,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Dropped the incorrect `Cargo.lock` entry from `.gitignore`; this is a
   binary crate and the lockfile is committed (EDGEAI-1236).
 
-### Fixed
-
-- Handle empty-string environment variables in `recorder.default` (e.g. `DURATION=""`, `TOPICS=""`, `CONNECT=""`, `LISTEN=""`) so systemd EnvironmentFile defaults do not crash startup
-
-### Changed
-
-- **Breaking:** Removed `--all-topics` (`-a`); omitting topics now discovers and records all active Zenoh topics by default
+## [1.7.1] - 2026-03-01
 
 ### Added
 

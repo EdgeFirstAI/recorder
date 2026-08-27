@@ -348,12 +348,16 @@ async fn main() -> Result<()> {
         .map_err(|e| anyhow!("failed to open Zenoh session: {e}"))?;
 
     // Discover or normalize topics
-    let topics: Vec<String> = if args.topics().is_empty() {
+    let requested_topics = args.topics();
+    let topics: Vec<String> = if requested_topics.is_empty() {
         discover_topics(&session, args.timeout)
             .await
             .context("topic discovery failed")?
     } else {
-        args.topics().iter().map(|t| normalize_topic(t)).collect()
+        requested_topics
+            .iter()
+            .map(|t| normalize_topic(t))
+            .collect()
     };
 
     if topics.is_empty() {

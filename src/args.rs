@@ -96,6 +96,8 @@ pub struct Args {
         long,
         env = "NO_MULTICAST_SCOUTING",
         default_value = "false",
+        default_missing_value = "true",
+        num_args(0..=1),
         value_parser = parse_bool
     )]
     pub no_multicast_scouting: bool,
@@ -316,6 +318,18 @@ mod tests {
     #[test]
     fn parse_bool_empty() {
         assert!(!parse_bool("").unwrap());
+    }
+
+    #[test]
+    fn no_multicast_scouting_as_flag() {
+        let args = Args::parse_from(["test", "--no-multicast-scouting"]);
+        assert!(args.no_multicast_scouting);
+    }
+
+    #[test]
+    fn no_multicast_scouting_explicit_false() {
+        let args = Args::parse_from(["test", "--no-multicast-scouting", "false"]);
+        assert!(!args.no_multicast_scouting);
     }
 
     #[test]
