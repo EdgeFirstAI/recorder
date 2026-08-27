@@ -12,7 +12,7 @@
 # - actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 (v4)
 # - actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 (v4)
 # - taiki-e/install-action@b9c5db3aef04caffaf95a1d03931de10fb2a140f (v2)
-# - SonarSource/sonarqube-scan-action@689fb39b34b9aa95ebc5f8f119343ddd51542402 (v4)
+# - SonarSource/sonarqube-scan-action@22918119ff8e1ca75a623e15c8296b6ea4fbe28f (v8.2.1)
 
 name: Test
 
@@ -173,7 +173,8 @@ jobs:
           cargo llvm-cov --workspace --lcov --output-path target/rust-coverage.lcov || true
 
       - name: SonarCloud Scan
-        uses: SonarSource/sonarcloud-github-action@e44258b109568baa0df60ed515909fc6c72cba92  # v3.1.0
+        # v8 embeds SonarScanner CLI with Java 21 (required by SonarCloud as of 2026)
+        uses: SonarSource/sonarqube-scan-action@22918119ff8e1ca75a623e15c8296b6ea4fbe28f  # v8.2.1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
