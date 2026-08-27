@@ -161,8 +161,8 @@ if [ -f "Cargo.toml" ]; then
     echo "  Generating Rust dependencies with cargo cyclonedx..."
     cargo cyclonedx --format json --all
 
-    # Find and use the generated .cdx.json file
-    CDX_FILES=$(find . -name "*.cdx.json" -type f 2>/dev/null)
+    # Find and use the generated .cdx.json file (exclude venv; pip ships its own)
+    CDX_FILES=$(find . -name "*.cdx.json" -type f ! -path "./venv/*" 2>/dev/null)
     if [ -z "$CDX_FILES" ]; then
         echo "  Warning: cargo cyclonedx did not generate any .cdx.json files"
         # Create empty deps-sbom.json
@@ -299,7 +299,7 @@ echo
 
 # Cleanup temporary files
 rm -f $SBOM_FILES source-sbom.json deps-sbom.json sbom-deps.json
-find . -name "*.cdx.json" -type f -delete 2>/dev/null || true
+find . -name "*.cdx.json" -type f ! -path "./venv/*" -delete 2>/dev/null || true
 
 echo "=================================================="
 echo "SBOM Generation Complete"
