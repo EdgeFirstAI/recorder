@@ -71,7 +71,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Dropped the incorrect `Cargo.lock` entry from `.gitignore`; this is a
   binary crate and the lockfile is committed (EDGEAI-1236).
 
-## [1.7.1] - 2026-03-01
+### Fixed
+
+- Handle empty-string environment variables in `recorder.default` (e.g. `DURATION=""`, `TOPICS=""`, `CONNECT=""`, `LISTEN=""`) so systemd EnvironmentFile defaults do not crash startup
+
+### Changed
+
+- **Breaking:** Removed `--all-topics` (`-a`); omitting topics now discovers and records all active Zenoh topics by default
 
 ### Added
 

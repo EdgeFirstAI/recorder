@@ -45,8 +45,8 @@ COMPRESSION="lz4"
 # Topics
 # ---------------------------------------------------------------------------
 # Space-delimited list of Zenoh topics to record. When set, only these
-# specific topics are recorded. When empty, use the --all-topics flag or
-# specify topics on the command line.
+# specific topics are recorded. When empty, all active topics are discovered
+# and recorded automatically.
 # Example: TOPICS="rt/camera/h264 rt/radar/cube"
 TOPICS=""
 
