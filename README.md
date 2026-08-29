@@ -66,7 +66,7 @@ edgefirst-recorder
 **Record specific topics:**
 
 ```bash
-edgefirst-recorder /camera/image /radar/targets /detect
+edgefirst-recorder camera/h264 radar/targets model/output
 ```
 
 **Record for 30 seconds with Zstd compression:**
@@ -109,7 +109,7 @@ Open the generated `.mcap` file in [Foxglove Studio](https://foxglove.dev/):
 | `--listen` | `LISTEN` | | Zenoh endpoints to listen on |
 | `--no-multicast-scouting` | `NO_MULTICAST_SCOUTING` | | Disable Zenoh multicast discovery |
 
-Topic names are automatically normalized to the `rt/` prefix convention used by the Zenoh-ROS 2 bridge. For example, `/camera/image` becomes `rt/camera/image`.
+The recorder shares the device hostname as its Zenoh session namespace, so topic arguments are bare application keys (`camera/h264`, `radar/cube`). A leading `/` is stripped. On the wire those keys appear as `{hostname}/camera/h264`. When no topics are given, discovery records every key in that namespace.
 
 ## Output
 

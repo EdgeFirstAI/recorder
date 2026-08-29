@@ -103,9 +103,34 @@ pub struct Args {
     pub no_multicast_scouting: bool,
 }
 
+/// System hostname used as the Zenoh session namespace.
+///
+/// Empty or `/`-containing hostnames would create unintended sub-keys, so we
+/// fall back to `"localhost"` and warn. Two devices both falling back would
+/// silently share a namespace; that is a deployment defect.
+fn zenoh_namespace() -> String {
+    let raw = hostname::get()
+        .map(|h| h.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    if raw.is_empty() || raw.contains('/') {
+        log::warn!(
+            "system hostname `{raw}` is empty or contains '/' — falling back to \"localhost\""
+        );
+        "localhost".into()
+    } else {
+        raw
+    }
+}
+
 impl From<Args> for Config {
     fn from(args: Args) -> Self {
         let mut config = Config::default();
+
+        // Session namespace = hostname: application keys are bare
+        // (`camera/h264`) and the wire form is `{hostname}/camera/h264`.
+        config
+            .insert_json5("namespace", &json!(zenoh_namespace()).to_string())
+            .unwrap();
 
         config
             .insert_json5("mode", &json!(args.mode).to_string())
@@ -249,11 +274,26 @@ mod tests {
 
     #[test]
     fn topics_positional() {
-        let args = Args::parse_from(["test", "rt/camera/h264", "rt/radar/cube"]);
+        let args = Args::parse_from(["test", "camera/h264", "radar/cube"]);
         assert_eq!(
             args.topics(),
-            vec!["rt/camera/h264".to_string(), "rt/radar/cube".to_string()]
+            vec!["camera/h264".to_string(), "radar/cube".to_string()]
         );
+    }
+
+    #[test]
+    fn zenoh_config_sets_namespace() {
+        let args = Args::parse_from(["test"]);
+        let cfg = Config::from(args);
+        let ns: String = serde_json::from_str(&cfg.to_string())
+            .ok()
+            .and_then(|v: serde_json::Value| {
+                v.pointer("/namespace")
+                    .and_then(|n| n.as_str().map(String::from))
+            })
+            .expect("namespace should be set in config");
+        assert!(!ns.is_empty(), "namespace should be non-empty");
+        assert!(!ns.contains('/'), "namespace must not contain '/'");
     }
 
     #[test]

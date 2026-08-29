@@ -69,15 +69,15 @@ edgefirst-recorder --duration 30
 **Or record specific topics:**
 
 ```bash
-edgefirst-recorder /camera/image /radar/targets /detect --duration 30
+edgefirst-recorder camera/h264 radar/targets model/output --duration 30
 ```
 
 The recorder logs each discovered topic and its encoding:
 
 ```
-[INFO] Subscribed to rt/camera/image (encoding: sensor_msgs/msg/Image)
-[INFO] Subscribed to rt/radar/targets (encoding: sensor_msgs/msg/PointCloud2)
-[INFO] Subscribed to rt/detect (encoding: edgefirst_msgs/msg/Detect)
+[INFO] Subscribed to camera/h264 (encoding: foxglove_msgs/msg/CompressedVideo)
+[INFO] Subscribed to radar/targets (encoding: sensor_msgs/msg/PointCloud2)
+[INFO] Subscribed to model/output (encoding: edgefirst_msgs/msg/Model)
 [INFO] Recording to maivin_2025_06_15_14_30_00.mcap
 ```
 
