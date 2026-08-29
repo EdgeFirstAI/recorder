@@ -91,14 +91,16 @@ The recorder logs each discovered topic and its encoding:
 
 | Topic | Foxglove Panel | What to Check |
 |-------|---------------|---------------|
-| `/camera/image` | Image | Frames render, timestamps advance |
-| `/camera/compressed` | Image | JPEG frames decode correctly |
-| `/radar/targets` | 3D Panel | Point cloud with x, y, z positions |
-| `/radar/clusters` | 3D Panel | Clustered points with track IDs |
-| `/detect` | Raw Messages | Detection bounding boxes present |
-| `/tf_static` | 3D Panel | Transform frame visible |
-| `/imu/data` | Plot | Accelerometer/gyroscope traces |
-| `/camera/info` | Raw Messages | Intrinsics and distortion parameters |
+| `camera/h264` | Image | Frames decode, timestamps advance |
+| `camera/frame` | Raw Messages | CameraFrame samples present |
+| `camera/info` | Raw Messages | Intrinsics and distortion parameters |
+| `radar/targets` | 3D Panel | Point cloud with x, y, z positions |
+| `model/output` | Raw Messages | Detection boxes / masks present |
+| `lidar/points` | 3D Panel | LiDAR point cloud |
+| `fusion/lidar` | 3D Panel | Fused lidar |
+| `tf_static` | 3D Panel | Transform frame visible |
+| `imu` | Plot | Accelerometer/gyroscope traces |
+| `gps` | Raw Messages | NavSatFix updates |
 
 ### Step 4: Validate Recording Quality
 
