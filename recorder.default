@@ -47,7 +47,7 @@ COMPRESSION="lz4"
 # Space-delimited list of Zenoh topics to record. When set, only these
 # specific topics are recorded. When empty, all active topics are discovered
 # and recorded automatically.
-# Example: TOPICS="rt/camera/h264 rt/radar/cube"
+# Example: TOPICS="camera/h264 radar/cube"
 TOPICS=""
 
 # ---------------------------------------------------------------------------

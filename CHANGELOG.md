@@ -13,6 +13,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Set the Zenoh session namespace to the system hostname so discovered and
+  explicit topics are bare application keys (`camera/h264`). Wire keys are
+  `{hostname}/camera/h264` (EDGEAI-1396).
 - **Breaking:** Removed `--all-topics` (`-a`); omitting topics now discovers and records all active Zenoh topics by default
 
 ## [1.8.0] - 2026-04-30
