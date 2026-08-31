@@ -82,6 +82,10 @@ jobs:
         with:
           ref: ${{ github.sha }}
           running-workflow-name: 'Wait for CI Workflows'
+          # Release only needs build + SBOM artifacts. Waiting on SonarCloud (or
+          # other quality checks) previously blocked publishing when the quality
+          # gate failed on main despite green package builds.
+          check-regexp: '(Build Packages|Verify Builds|Generate SBOM)'
           repo-token: ${{ secrets.GITHUB_TOKEN }}
           wait-interval: 10
 

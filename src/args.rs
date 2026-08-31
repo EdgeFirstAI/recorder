@@ -112,13 +112,18 @@ fn zenoh_namespace() -> String {
     let raw = hostname::get()
         .map(|h| h.to_string_lossy().into_owned())
         .unwrap_or_default();
+    zenoh_namespace_from(&raw)
+}
+
+/// Resolve a Zenoh session namespace from a raw hostname string.
+fn zenoh_namespace_from(raw: &str) -> String {
     if raw.is_empty() || raw.contains('/') {
         log::warn!(
             "system hostname `{raw}` is empty or contains '/' — falling back to \"localhost\""
         );
         "localhost".into()
     } else {
-        raw
+        raw.to_owned()
     }
 }
 
@@ -297,6 +302,68 @@ mod tests {
     }
 
     #[test]
+    fn zenoh_namespace_from_valid() {
+        assert_eq!(zenoh_namespace_from("adis-uav1"), "adis-uav1");
+    }
+
+    #[test]
+    fn zenoh_namespace_from_empty_falls_back() {
+        assert_eq!(zenoh_namespace_from(""), "localhost");
+    }
+
+    #[test]
+    fn zenoh_namespace_from_slash_falls_back() {
+        assert_eq!(zenoh_namespace_from("bad/name"), "localhost");
+    }
+
+    #[test]
+    fn compression_into_mcap() {
+        assert!(Option::<mcap::Compression>::from(Compression::None).is_none());
+        assert!(matches!(
+            Option::<mcap::Compression>::from(Compression::Lz4),
+            Some(mcap::Compression::Lz4)
+        ));
+        assert!(matches!(
+            Option::<mcap::Compression>::from(Compression::Zstd),
+            Some(mcap::Compression::Zstd)
+        ));
+    }
+
+    #[test]
+    fn zenoh_config_connect_listen_and_scouting() {
+        let args = Args {
+            duration: None,
+            timeout: 5,
+            compression: Compression::None,
+            topics: vec![],
+            cube_fps: None,
+            mode: WhatAmI::Peer,
+            connect: vec!["".to_string(), "tcp/127.0.0.1:7447".to_string()],
+            listen: vec!["".to_string(), "tcp/0.0.0.0:7447".to_string()],
+            strip_hostname: false,
+            no_multicast_scouting: true,
+        };
+        let cfg = Config::from(args);
+        let v: serde_json::Value =
+            serde_json::from_str(&cfg.to_string()).expect("config serializes to JSON");
+        let connect = v
+            .pointer("/connect/endpoints")
+            .and_then(|n| n.as_array())
+            .expect("connect endpoints set");
+        assert_eq!(connect.len(), 1);
+        let listen = v
+            .pointer("/listen/endpoints")
+            .and_then(|n| n.as_array())
+            .expect("listen endpoints set");
+        assert_eq!(listen.len(), 1);
+        assert_eq!(
+            v.pointer("/scouting/multicast/enabled")
+                .and_then(|n| n.as_bool()),
+            Some(false)
+        );
+    }
+
+    #[test]
     fn topics_empty_string_filtered() {
         let args = Args {
             duration: None,
@@ -358,6 +425,26 @@ mod tests {
     #[test]
     fn parse_bool_empty() {
         assert!(!parse_bool("").unwrap());
+    }
+
+    #[test]
+    fn parse_bool_truthy() {
+        assert!(parse_bool("true").unwrap());
+        assert!(parse_bool("1").unwrap());
+        assert!(parse_bool("yes").unwrap());
+        assert!(parse_bool("YES").unwrap());
+    }
+
+    #[test]
+    fn parse_bool_falsy() {
+        assert!(!parse_bool("false").unwrap());
+        assert!(!parse_bool("0").unwrap());
+        assert!(!parse_bool("no").unwrap());
+    }
+
+    #[test]
+    fn parse_bool_invalid() {
+        assert!(parse_bool("maybe").is_err());
     }
 
     #[test]
