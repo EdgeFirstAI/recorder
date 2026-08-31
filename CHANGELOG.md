@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.9.0] - 2026-08-31
+
 ### Fixed
 
 - Handle empty-string environment variables in `recorder.default` (e.g. `DURATION=""`, `TOPICS=""`, `CONNECT=""`, `LISTEN=""`) so systemd EnvironmentFile defaults do not crash startup
