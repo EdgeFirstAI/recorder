@@ -112,18 +112,19 @@ fn zenoh_namespace() -> String {
     let raw = hostname::get()
         .map(|h| h.to_string_lossy().into_owned())
         .unwrap_or_default();
-    zenoh_namespace_from(&raw)
+    zenoh_namespace_from(raw)
 }
 
 /// Resolve a Zenoh session namespace from a raw hostname string.
-fn zenoh_namespace_from(raw: &str) -> String {
+fn zenoh_namespace_from(raw: impl Into<String>) -> String {
+    let raw = raw.into();
     if raw.is_empty() || raw.contains('/') {
         log::warn!(
             "system hostname `{raw}` is empty or contains '/' — falling back to \"localhost\""
         );
         "localhost".into()
     } else {
-        raw.to_owned()
+        raw
     }
 }
 
