@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.9.1] - 2026-08-31
+
+### Fixed
+
+- Raise unit-test coverage of empty-env parsing and hostname Zenoh namespace
+  helpers so SonarCloud's Coverage on New Code quality gate passes on `main`
+  (blocked the v1.9.0 GitHub Release)
+- Release workflow waits only on build and SBOM checks instead of every CI
+  check, so a SonarCloud quality-gate failure cannot block publishing binaries
+
 ## [1.9.0] - 2026-08-31
 
 ### Fixed
