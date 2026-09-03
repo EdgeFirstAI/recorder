@@ -1,4 +1,4 @@
-# This hold basic information about the characteristics of the OccupancyGrid.
+# This holds basic information about the characteristics of the OccupancyGrid.
 
 builtin_interfaces/Time map_load_time
 float32 resolution
