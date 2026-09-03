@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.10.0] - 2026-09-03
+
 ### Added
 
 - Embedded schema bundles for `nav_msgs/{GridCells,MapMetaData,OccupancyGrid,Path}`,
@@ -23,6 +25,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Refreshed the documented supported-schema inventory and ARM64 cross-compile
   instructions in `README.md` to match the recorder's current release process
   and embedded message set (EDGEAI-1389).
+
+### Removed
+
+- Dropped embedded `edgefirst_msgs/{CameraPlane,DmaBuffer}` schema bundles.
+  EdgeFirst Schemas 4.0.0 removed those types; `CameraFrame` now carries a
+  Tensor payload instead (EDGEAI-1389).
 
 ## [1.9.1] - 2026-08-31
 
