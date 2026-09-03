@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Embedded schema bundles for `nav_msgs/{GridCells,MapMetaData,OccupancyGrid,Path}`,
+  `sensor_msgs/{RelativeHumidity,TimeReference}`, and
+  `edgefirst_msgs/{Tensor,TensorPlane,TensorStamped}` so current MCAP
+  recordings can preserve the newer ROS type definitions these topics use
+  (EDGEAI-1389).
+
+### Changed
+
+- Updated the embedded `edgefirst_msgs/CameraFrame` schema bundle to the
+  4.0-era tensor-backed layout while preserving the recorder's static-schema
+  workflow (EDGEAI-1389).
+- Refreshed the documented supported-schema inventory and ARM64 cross-compile
+  instructions in `README.md` to match the recorder's current release process
+  and embedded message set (EDGEAI-1389).
+
 ## [1.9.1] - 2026-08-31
 
 ### Fixed
