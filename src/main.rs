@@ -581,6 +581,20 @@ mod schema_registry_tests {
     }
 
     #[test]
+    fn drops_obsolete_pre_4_camera_plane_and_dma_buffer() {
+        let all = schemas::get_all();
+        for key in [
+            "schemas/edgefirst_msgs/msg/CameraPlane.msg",
+            "schemas/edgefirst_msgs/msg/DmaBuffer.msg",
+        ] {
+            assert!(
+                !all.contains_key(key),
+                "obsolete 4.0-removed type still embedded: {key}"
+            );
+        }
+    }
+
+    #[test]
     fn camera_frame_bundle_references_tensor_payload() {
         let all = schemas::get_all();
         let camera_frame = all

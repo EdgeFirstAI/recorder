@@ -24,7 +24,7 @@ The recorder includes schemas for the following message types:
 
 | Package | Messages |
 |---------|----------|
-| `edgefirst_msgs` | Box, CameraFrame, CameraPlane, Date, Detect, DmaBuffer, LocalTime, Mask, Model, ModelInfo, RadarCube, RadarInfo, Tensor, TensorPlane, TensorStamped, Track, Vibration |
+| `edgefirst_msgs` | Box, CameraFrame, Date, Detect, LocalTime, Mask, Model, ModelInfo, RadarCube, RadarInfo, Tensor, TensorPlane, TensorStamped, Track, Vibration |
 | `sensor_msgs` | BatteryState, CameraInfo, CompressedImage, FluidPressure, Image, Imu, MagneticField, NavSatFix, NavSatStatus, PointCloud2, RelativeHumidity, Temperature, TimeReference |
 | `geometry_msgs` | AccelStamped, AccelWithCovarianceStamped, InertiaStamped, PointStamped, PolygonStamped, PoseArray, PoseStamped, PoseWithCovarianceStamped, QuaternionStamped, TransformStamped, TwistStamped, TwistWithCovarianceStamped, Vector3Stamped, WrenchStamped |
 | `nav_msgs` | GridCells, MapMetaData, OccupancyGrid, Odometry, Path |
