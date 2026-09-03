@@ -24,9 +24,11 @@ The recorder includes schemas for the following message types:
 
 | Package | Messages |
 |---------|----------|
-| `edgefirst_msgs` | Detect, DmaBuffer, LocalTime, Mask, Model, ModelInfo, RadarCube, RadarInfo |
-| `sensor_msgs` | CameraInfo, CompressedImage, Image, Imu, NavSatFix, NavSatStatus, PointCloud2 |
-| `geometry_msgs` | TransformStamped |
+| `edgefirst_msgs` | Box, CameraFrame, CameraPlane, Date, Detect, DmaBuffer, LocalTime, Mask, Model, ModelInfo, RadarCube, RadarInfo, Tensor, TensorPlane, TensorStamped, Track, Vibration |
+| `sensor_msgs` | BatteryState, CameraInfo, CompressedImage, FluidPressure, Image, Imu, MagneticField, NavSatFix, NavSatStatus, PointCloud2, RelativeHumidity, Temperature, TimeReference |
+| `geometry_msgs` | AccelStamped, AccelWithCovarianceStamped, InertiaStamped, PointStamped, PolygonStamped, PoseArray, PoseStamped, PoseWithCovarianceStamped, QuaternionStamped, TransformStamped, TwistStamped, TwistWithCovarianceStamped, Vector3Stamped, WrenchStamped |
+| `nav_msgs` | GridCells, MapMetaData, OccupancyGrid, Odometry, Path |
+| `mavros_msgs` | Altitude, EstimatorStatus, ExtendedState, GPSRAW, State, StatusText, SysStatus, TimesyncStatus, VfrHud |
 | `foxglove_msgs` | CompressedImage, CompressedVideo, ImageAnnotations |
 | `visualization_msgs` | Marker |
 
@@ -51,8 +53,8 @@ sudo cp target/release/edgefirst-recorder /usr/local/bin/
 **Cross-Compile for ARM64:**
 
 ```bash
-cargo install cross
-cross build --target aarch64-unknown-linux-gnu --release
+cargo install cargo-zigbuild
+cargo zigbuild --release --locked --target aarch64-unknown-linux-gnu.2.17
 ```
 
 ### Basic Usage

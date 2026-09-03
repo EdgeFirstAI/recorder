@@ -560,6 +560,41 @@ mod schema_registry_tests {
             );
         }
     }
+
+    #[test]
+    fn includes_edgeai_1389_schema_refresh_set() {
+        let all = schemas::get_all();
+        for key in [
+            "schemas/nav_msgs/msg/GridCells.msg",
+            "schemas/nav_msgs/msg/MapMetaData.msg",
+            "schemas/nav_msgs/msg/OccupancyGrid.msg",
+            "schemas/nav_msgs/msg/Path.msg",
+            "schemas/sensor_msgs/msg/RelativeHumidity.msg",
+            "schemas/sensor_msgs/msg/TimeReference.msg",
+            "schemas/edgefirst_msgs/msg/Tensor.msg",
+            "schemas/edgefirst_msgs/msg/TensorPlane.msg",
+            "schemas/edgefirst_msgs/msg/TensorStamped.msg",
+            "schemas/edgefirst_msgs/msg/CameraFrame.msg",
+        ] {
+            assert!(all.contains_key(key), "missing schema bundle {key}");
+        }
+    }
+
+    #[test]
+    fn camera_frame_bundle_references_tensor_payload() {
+        let all = schemas::get_all();
+        let camera_frame = all
+            .get("schemas/edgefirst_msgs/msg/CameraFrame.msg")
+            .expect("camera frame bundle present");
+        assert!(
+            camera_frame.contains("edgefirst_msgs/Tensor tensor"),
+            "camera frame schema should embed Tensor"
+        );
+        assert!(
+            camera_frame.contains("MSG: edgefirst_msgs/TensorPlane"),
+            "camera frame bundle should inline TensorPlane"
+        );
+    }
 }
 
 #[cfg(test)]

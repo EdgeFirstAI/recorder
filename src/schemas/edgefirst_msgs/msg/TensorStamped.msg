@@ -1,23 +1,15 @@
 # SPDX-License-Identifier: Apache-2.0
 # Copyright (c) 2026 Au-Zone Technologies. All Rights Reserved.
 
-# CameraFrame -- a camera frame as a stamped Tensor.
+# TensorStamped -- a Tensor with a timestamp and frame of reference.
 #
-# Byte-identical in layout to TensorStamped. It exists as a separate type
-# because the schema name is the contract on the topic: a subscriber or
-# visualizer dispatches on edgefirst_msgs/msg/CameraFrame to know the payload
-# is an image, without inspecting whether Tensor.format is non-empty.
-# Reinterpreting one as the other is therefore free.
-#
-# Changed in 4.0.0: previously carried width/height/format/colorimetry/planes
-# directly. Those now live in the embedded Tensor. Image dimensions come from
-# Tensor.shape; the per-format convention is pinned in the HAL format table.
-# Supersedes DmaBuffer (removed in 4.0.0) and the former CameraPlane.
+# The standalone tensor IPC message. Byte-identical in layout to CameraFrame;
+# the two are distinct types because in ROS the schema name is the contract on
+# the topic.
 
-std_msgs/Header header   # Timestamp and coordinate frame_id
-uint64 seq               # Monotonic frame index for drop detection
-                         # (V4L2 sequence / libcamera Request.sequence)
-edgefirst_msgs/Tensor tensor  # The payload; MUST remain the last field
+std_msgs/Header header
+uint64 seq
+edgefirst_msgs/Tensor tensor
 
 ================================================================================
 MSG: edgefirst_msgs/Tensor
@@ -25,10 +17,6 @@ MSG: edgefirst_msgs/Tensor
 # Copyright (c) 2026 Au-Zone Technologies. All Rights Reserved.
 
 # Tensor -- generic n-dimensional buffer reference.
-#
-# A 1:1 projection of the edgefirst-tensor HAL blob. Carries storage,
-# geometry, optional image interpretation and optional quantization. This
-# library carries these fields; it never interprets them.
 
 uint32 storage_kind
 uint32 pid
