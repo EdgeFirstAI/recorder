@@ -1,7 +1,7 @@
 // Copyright 2025 Au-Zone Technologies Inc.
 // SPDX-License-Identifier: Apache-2.0
 
-use clap::{Parser, ValueEnum};
+use clap::{CommandFactory, Parser, ValueEnum};
 use serde_json::json;
 use zenoh::config::{Config, WhatAmI};
 
@@ -25,6 +25,36 @@ impl From<Compression> for Option<mcap::Compression> {
             Compression::None => None,
             Compression::Lz4 => Some(mcap::Compression::Lz4),
             Compression::Zstd => Some(mcap::Compression::Zstd),
+        }
+    }
+}
+
+/// Environment variables where an empty value is meaningful and must be preserved
+/// (i.e. the argument has a non-empty default but "" is a documented "disable" sentinel).
+///
+/// The recorder has no such variables: every `KEY=""` in `recorder.default`
+/// means "use the default".
+pub const KEEP: &[&str] = &[];
+
+/// Treat an empty environment variable as unset, so clap's declared
+/// `default_value` applies instead of failing to parse.
+///
+/// Only variables bound to this program's own arguments are considered;
+/// unrelated process environment is left alone. `keep` names variables
+/// where an empty value is meaningful and must be preserved.
+///
+/// # Safety
+/// Must be called before any thread is spawned — that is, before the tokio
+/// runtime is built. Mutating the process environment is not thread-safe.
+pub unsafe fn scrub_empty_env<C: CommandFactory>(keep: &[&str]) {
+    for arg in C::command().get_arguments() {
+        let Some(env) = arg.get_env() else { continue };
+        let name = env.to_string_lossy().into_owned();
+        if keep.contains(&name.as_str()) {
+            continue;
+        }
+        if matches!(std::env::var(&name), Ok(v) if v.is_empty()) {
+            std::env::remove_var(&name);
         }
     }
 }
@@ -238,6 +268,82 @@ impl Args {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Env-bound arguments with a non-empty default where we have consciously decided
+    /// that an empty value is NOT meaningful (so scrubbing to the default is correct).
+    const SCRUB_REVIEWED: &[&str] = &["COMPRESSION", "MODE", "NO_MULTICAST_SCOUTING"];
+
+    #[test]
+    fn every_env_arg_is_either_scrubbable_or_explicitly_kept() {
+        for arg in Args::command().get_arguments() {
+            let Some(env) = arg.get_env() else { continue };
+            let name = env.to_string_lossy().into_owned();
+            let has_nonempty_default = arg
+                .get_default_values()
+                .first()
+                .is_some_and(|d| !d.is_empty());
+            if has_nonempty_default && !KEEP.contains(&name.as_str()) {
+                assert!(
+                    SCRUB_REVIEWED.contains(&name.as_str()),
+                    "{name} has a non-empty default; decide whether empty is meaningful \
+                     and add it to KEEP or SCRUB_REVIEWED"
+                );
+            }
+        }
+    }
+
+    /// Serialises the tests below: each one mutates the process environment
+    /// and runs `scrub_empty_env`, which would otherwise race the other.
+    static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    fn env_lock() -> std::sync::MutexGuard<'static, ()> {
+        ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
+    /// `CUBE_FPS=""` and `TOPICS=""` (as shipped in `recorder.default`) must be
+    /// invisible to clap after scrubbing: the raw fields come back as absent
+    /// rather than `Some(0)` / `[""]`.
+    ///
+    /// Only variables whose empty value the custom parsers already tolerate are
+    /// set here, so a concurrently running `parse_from` test cannot be broken
+    /// by the brief window before the scrub removes them.
+    #[test]
+    fn scrub_empty_env_makes_empty_vars_absent() {
+        let _guard = env_lock();
+        std::env::set_var("CUBE_FPS", "");
+        std::env::set_var("TOPICS", "");
+        assert_eq!(std::env::var("CUBE_FPS").as_deref(), Ok(""));
+
+        // SAFETY: test-only; the variables set above are tolerated by every
+        // other test in this module, so a racing reader sees no failure.
+        unsafe { scrub_empty_env::<Args>(KEEP) };
+
+        assert!(std::env::var_os("CUBE_FPS").is_none());
+        assert!(std::env::var_os("TOPICS").is_none());
+
+        let args = Args::try_parse_from(["test"]).expect("parse succeeds with empty env scrubbed");
+        assert_eq!(
+            args.cube_fps, None,
+            "CUBE_FPS=\"\" must not reach the parser"
+        );
+        assert!(args.topics.is_empty(), "TOPICS=\"\" must not yield [\"\"]");
+        assert_eq!(args.cube_fps(), None);
+        assert!(args.topics().is_empty());
+    }
+
+    #[test]
+    fn scrub_empty_env_preserves_non_empty_and_keep() {
+        // A non-empty value must survive scrubbing; a variable listed in `keep`
+        // must survive even when empty. Both are unrelated to any other test.
+        let _guard = env_lock();
+        std::env::set_var("STRIP_HOSTNAME", "true");
+        std::env::set_var("LISTEN", "");
+        unsafe { scrub_empty_env::<Args>(&["LISTEN"]) };
+        assert_eq!(std::env::var("STRIP_HOSTNAME").as_deref(), Ok("true"));
+        assert_eq!(std::env::var("LISTEN").as_deref(), Ok(""));
+        std::env::remove_var("STRIP_HOSTNAME");
+        std::env::remove_var("LISTEN");
+    }
 
     #[test]
     fn parse_duration_empty() {
