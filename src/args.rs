@@ -36,6 +36,23 @@ impl From<Compression> for Option<mcap::Compression> {
 /// means "use the default".
 pub const KEEP: &[&str] = &[];
 
+/// Names of this program's env-bound arguments whose value, as reported by
+/// `var`, is present but empty and not listed in `keep`.
+///
+/// Pure: the environment is only read through `var`, so this can be unit
+/// tested with a fake lookup and no process-wide mutation.
+pub fn empty_env_vars<C: CommandFactory>(
+    keep: &[&str],
+    var: impl Fn(&str) -> Option<String>,
+) -> Vec<String> {
+    C::command()
+        .get_arguments()
+        .filter_map(|arg| arg.get_env().map(|e| e.to_string_lossy().into_owned()))
+        .filter(|name| !keep.contains(&name.as_str()))
+        .filter(|name| var(name).is_some_and(|v| v.is_empty()))
+        .collect()
+}
+
 /// Treat an empty environment variable as unset, so clap's declared
 /// `default_value` applies instead of failing to parse.
 ///
@@ -47,15 +64,8 @@ pub const KEEP: &[&str] = &[];
 /// Must be called before any thread is spawned — that is, before the tokio
 /// runtime is built. Mutating the process environment is not thread-safe.
 pub unsafe fn scrub_empty_env<C: CommandFactory>(keep: &[&str]) {
-    for arg in C::command().get_arguments() {
-        let Some(env) = arg.get_env() else { continue };
-        let name = env.to_string_lossy().into_owned();
-        if keep.contains(&name.as_str()) {
-            continue;
-        }
-        if matches!(std::env::var(&name), Ok(v) if v.is_empty()) {
-            std::env::remove_var(&name);
-        }
+    for name in empty_env_vars::<C>(keep, |name| std::env::var(name).ok()) {
+        std::env::remove_var(&name);
     }
 }
 
@@ -292,57 +302,54 @@ mod tests {
         }
     }
 
-    /// Serialises the tests below: each one mutates the process environment
-    /// and runs `scrub_empty_env`, which would otherwise race the other.
-    static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
-
-    fn env_lock() -> std::sync::MutexGuard<'static, ()> {
-        ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner())
+    /// Fake environment for `empty_env_vars`: only the listed names are "set".
+    fn fake_env<'a>(vars: &'a [(&'a str, &'a str)]) -> impl Fn(&str) -> Option<String> + 'a {
+        move |name| {
+            vars.iter()
+                .find(|(k, _)| *k == name)
+                .map(|(_, v)| (*v).to_string())
+        }
     }
 
-    /// `CUBE_FPS=""` and `TOPICS=""` (as shipped in `recorder.default`) must be
-    /// invisible to clap after scrubbing: the raw fields come back as absent
-    /// rather than `Some(0)` / `[""]`.
-    ///
-    /// Only variables whose empty value the custom parsers already tolerate are
-    /// set here, so a concurrently running `parse_from` test cannot be broken
-    /// by the brief window before the scrub removes them.
     #[test]
-    fn scrub_empty_env_makes_empty_vars_absent() {
-        let _guard = env_lock();
-        std::env::set_var("CUBE_FPS", "");
-        std::env::set_var("TOPICS", "");
-        assert_eq!(std::env::var("CUBE_FPS").as_deref(), Ok(""));
+    fn empty_env_vars_lists_empty_bound_var() {
+        let mut names = empty_env_vars::<Args>(KEEP, fake_env(&[("CUBE_FPS", ""), ("TOPICS", "")]));
+        names.sort();
+        assert_eq!(names, vec!["CUBE_FPS".to_string(), "TOPICS".to_string()]);
+    }
 
-        // SAFETY: test-only; the variables set above are tolerated by every
-        // other test in this module, so a racing reader sees no failure.
-        unsafe { scrub_empty_env::<Args>(KEEP) };
-
-        assert!(std::env::var_os("CUBE_FPS").is_none());
-        assert!(std::env::var_os("TOPICS").is_none());
-
-        let args = Args::try_parse_from(["test"]).expect("parse succeeds with empty env scrubbed");
-        assert_eq!(
-            args.cube_fps, None,
-            "CUBE_FPS=\"\" must not reach the parser"
+    #[test]
+    fn empty_env_vars_skips_non_empty_var() {
+        let names = empty_env_vars::<Args>(KEEP, fake_env(&[("CUBE_FPS", "10")]));
+        assert!(
+            names.is_empty(),
+            "non-empty value must not be listed: {names:?}"
         );
-        assert!(args.topics.is_empty(), "TOPICS=\"\" must not yield [\"\"]");
-        assert_eq!(args.cube_fps(), None);
-        assert!(args.topics().is_empty());
     }
 
     #[test]
-    fn scrub_empty_env_preserves_non_empty_and_keep() {
-        // A non-empty value must survive scrubbing; a variable listed in `keep`
-        // must survive even when empty. Both are unrelated to any other test.
-        let _guard = env_lock();
-        std::env::set_var("STRIP_HOSTNAME", "true");
-        std::env::set_var("LISTEN", "");
-        unsafe { scrub_empty_env::<Args>(&["LISTEN"]) };
-        assert_eq!(std::env::var("STRIP_HOSTNAME").as_deref(), Ok("true"));
-        assert_eq!(std::env::var("LISTEN").as_deref(), Ok(""));
-        std::env::remove_var("STRIP_HOSTNAME");
-        std::env::remove_var("LISTEN");
+    fn empty_env_vars_skips_unset_var() {
+        let names = empty_env_vars::<Args>(KEEP, fake_env(&[]));
+        assert!(
+            names.is_empty(),
+            "unset variables must not be listed: {names:?}"
+        );
+    }
+
+    #[test]
+    fn empty_env_vars_honours_keep() {
+        let names =
+            empty_env_vars::<Args>(&["LISTEN"], fake_env(&[("LISTEN", ""), ("CONNECT", "")]));
+        assert_eq!(names, vec!["CONNECT".to_string()]);
+    }
+
+    #[test]
+    fn empty_env_vars_ignores_unbound_var() {
+        let names = empty_env_vars::<Args>(KEEP, fake_env(&[("NOT_A_RECORDER_ARG", "")]));
+        assert!(
+            names.is_empty(),
+            "unbound variables must never be listed: {names:?}"
+        );
     }
 
     #[test]

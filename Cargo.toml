@@ -34,5 +34,9 @@ signal-hook = "0.4.4"
 tokio = { version = "1.52.1", features = ["rt-multi-thread", "time", "io-std"] }
 zenoh = "1.9.0"
 
+[[test]]
+name = "env_scrub"
+harness = false
+
 [build-dependencies]
 include_walk = "0.3.2"
