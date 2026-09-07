@@ -5,7 +5,8 @@
 //!
 //! `main` speaks the small subset of the libtest CLI that `cargo test` and
 //! `cargo nextest` use to enumerate (`--list --format terse`) and select
-//! (`--exact <name>`, `--ignored`, positional filters) tests, so the target
+//! (`--exact <name>`, `--skip <pat>`, `--ignored`, positional filters) tests,
+//! so the target
 //! is discovered and reported like any other test. Without this, nextest
 //! rejects the binary: `line "env_scrub: ok" did not end with ": test"`.
 // args.rs's own `#[cfg(test)] mod tests` is compiled here but its `#[test]` fns
@@ -31,10 +32,10 @@ const ARGV: [&str; 1] = ["edgefirst-recorder"];
 const TEST_NAME: &str = "empty_env_is_treated_as_unset";
 
 /// libtest flags that consume the following argument, so it is not a filter.
-const VALUE_FLAGS: [&str; 6] = [
+/// `--skip` also takes a value but is handled separately because it matters.
+const VALUE_FLAGS: [&str; 5] = [
     "--test-threads",
     "--format",
-    "--skip",
     "--logfile",
     "--color",
     "--shuffle-seed",
@@ -46,6 +47,8 @@ struct Request {
     ignored: bool,
     exact: bool,
     filters: Vec<String>,
+    /// Patterns from `--skip <pat>` / `--skip=<pat>`; a match deselects the test.
+    skips: Vec<String>,
 }
 
 fn parse_request(argv: impl IntoIterator<Item = String>) -> Request {
@@ -54,6 +57,7 @@ fn parse_request(argv: impl IntoIterator<Item = String>) -> Request {
         ignored: false,
         exact: false,
         filters: Vec::new(),
+        skips: Vec::new(),
     };
     let mut argv = argv.into_iter();
     while let Some(arg) = argv.next() {
@@ -61,6 +65,10 @@ fn parse_request(argv: impl IntoIterator<Item = String>) -> Request {
             "--list" => req.list = true,
             "--ignored" => req.ignored = true,
             "--exact" => req.exact = true,
+            "--skip" => req.skips.extend(argv.next()),
+            flag if flag.starts_with("--skip=") => {
+                req.skips.push(flag["--skip=".len()..].to_owned());
+            }
             flag if VALUE_FLAGS.contains(&flag) => {
                 argv.next();
             }
@@ -71,15 +79,20 @@ fn parse_request(argv: impl IntoIterator<Item = String>) -> Request {
     req
 }
 
+/// libtest matching: substring by default, equality under `--exact`.
+fn matches(req: &Request, pattern: &str) -> bool {
+    if req.exact {
+        pattern == TEST_NAME
+    } else {
+        TEST_NAME.contains(pattern)
+    }
+}
+
+/// Selected when it passes the positional filter (if any) and no `--skip`
+/// pattern matches, mirroring libtest.
 fn selected(req: &Request) -> bool {
-    req.filters.is_empty()
-        || req.filters.iter().any(|f| {
-            if req.exact {
-                f == TEST_NAME
-            } else {
-                TEST_NAME.contains(f.as_str())
-            }
-        })
+    let filtered_in = req.filters.is_empty() || req.filters.iter().any(|f| matches(req, f));
+    filtered_in && !req.skips.iter().any(|s| matches(req, s))
 }
 
 fn main() {
