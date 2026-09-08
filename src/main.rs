@@ -336,8 +336,18 @@ async fn resolve_encoding(
     }
 }
 
-#[tokio::main]
-async fn main() -> Result<()> {
+fn main() -> Result<()> {
+    // SAFETY: single-threaded here; runs before the runtime is built below.
+    unsafe { args::scrub_empty_env::<Args>(args::KEEP) };
+
+    tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()
+        .context("failed to build tokio runtime")?
+        .block_on(run())
+}
+
+async fn run() -> Result<()> {
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
 
     let args = Args::parse();

@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.10.1] - 2026-09-07
+
+Patch release for EDGEAI-1094. Argument parsing only; no wire-format or
+configuration-key changes from 1.10.0.
+
+### Fixed
+
+- Empty environment variables in `/etc/default/recorder` (`KEY=""`, e.g.
+  `CUBE_FPS=""` or `TOPICS=""`) are now removed from the environment before
+  argument parsing so clap applies the documented default instead of seeing a
+  present-but-empty value (EDGEAI-1094). `#[tokio::main]` was replaced by an
+  explicit runtime build so the scrub runs before any thread exists.
+
 ## [1.10.0] - 2026-09-03
 
 ### Added

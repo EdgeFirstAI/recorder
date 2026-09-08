@@ -1,7 +1,7 @@
 // Copyright 2025 Au-Zone Technologies Inc.
 // SPDX-License-Identifier: Apache-2.0
 
-use clap::{Parser, ValueEnum};
+use clap::{CommandFactory, Parser, ValueEnum};
 use serde_json::json;
 use zenoh::config::{Config, WhatAmI};
 
@@ -26,6 +26,46 @@ impl From<Compression> for Option<mcap::Compression> {
             Compression::Lz4 => Some(mcap::Compression::Lz4),
             Compression::Zstd => Some(mcap::Compression::Zstd),
         }
+    }
+}
+
+/// Environment variables where an empty value is meaningful and must be preserved
+/// (i.e. the argument has a non-empty default but "" is a documented "disable" sentinel).
+///
+/// The recorder has no such variables: every `KEY=""` in `recorder.default`
+/// means "use the default".
+pub const KEEP: &[&str] = &[];
+
+/// Names of this program's env-bound arguments whose value, as reported by
+/// `var`, is present but empty and not listed in `keep`.
+///
+/// Pure: the environment is only read through `var`, so this can be unit
+/// tested with a fake lookup and no process-wide mutation.
+pub fn empty_env_vars<C: CommandFactory>(
+    keep: &[&str],
+    var: impl Fn(&str) -> Option<String>,
+) -> Vec<String> {
+    C::command()
+        .get_arguments()
+        .filter_map(|arg| arg.get_env().map(|e| e.to_string_lossy().into_owned()))
+        .filter(|name| !keep.contains(&name.as_str()))
+        .filter(|name| var(name).is_some_and(|v| v.is_empty()))
+        .collect()
+}
+
+/// Treat an empty environment variable as unset, so clap's declared
+/// `default_value` applies instead of failing to parse.
+///
+/// Only variables bound to this program's own arguments are considered;
+/// unrelated process environment is left alone. `keep` names variables
+/// where an empty value is meaningful and must be preserved.
+///
+/// # Safety
+/// Must be called before any thread is spawned — that is, before the tokio
+/// runtime is built. Mutating the process environment is not thread-safe.
+pub unsafe fn scrub_empty_env<C: CommandFactory>(keep: &[&str]) {
+    for name in empty_env_vars::<C>(keep, |name| std::env::var(name).ok()) {
+        std::env::remove_var(&name);
     }
 }
 
@@ -238,6 +278,79 @@ impl Args {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Env-bound arguments with a non-empty default where we have consciously decided
+    /// that an empty value is NOT meaningful (so scrubbing to the default is correct).
+    const SCRUB_REVIEWED: &[&str] = &["COMPRESSION", "MODE", "NO_MULTICAST_SCOUTING"];
+
+    #[test]
+    fn every_env_arg_is_either_scrubbable_or_explicitly_kept() {
+        for arg in Args::command().get_arguments() {
+            let Some(env) = arg.get_env() else { continue };
+            let name = env.to_string_lossy().into_owned();
+            let has_nonempty_default = arg
+                .get_default_values()
+                .first()
+                .is_some_and(|d| !d.is_empty());
+            if has_nonempty_default && !KEEP.contains(&name.as_str()) {
+                assert!(
+                    SCRUB_REVIEWED.contains(&name.as_str()),
+                    "{name} has a non-empty default; decide whether empty is meaningful \
+                     and add it to KEEP or SCRUB_REVIEWED"
+                );
+            }
+        }
+    }
+
+    /// Fake environment for `empty_env_vars`: only the listed names are "set".
+    fn fake_env<'a>(vars: &'a [(&'a str, &'a str)]) -> impl Fn(&str) -> Option<String> + 'a {
+        move |name| {
+            vars.iter()
+                .find(|(k, _)| *k == name)
+                .map(|(_, v)| (*v).to_string())
+        }
+    }
+
+    #[test]
+    fn empty_env_vars_lists_empty_bound_var() {
+        let mut names = empty_env_vars::<Args>(KEEP, fake_env(&[("CUBE_FPS", ""), ("TOPICS", "")]));
+        names.sort();
+        assert_eq!(names, vec!["CUBE_FPS".to_string(), "TOPICS".to_string()]);
+    }
+
+    #[test]
+    fn empty_env_vars_skips_non_empty_var() {
+        let names = empty_env_vars::<Args>(KEEP, fake_env(&[("CUBE_FPS", "10")]));
+        assert!(
+            names.is_empty(),
+            "non-empty value must not be listed: {names:?}"
+        );
+    }
+
+    #[test]
+    fn empty_env_vars_skips_unset_var() {
+        let names = empty_env_vars::<Args>(KEEP, fake_env(&[]));
+        assert!(
+            names.is_empty(),
+            "unset variables must not be listed: {names:?}"
+        );
+    }
+
+    #[test]
+    fn empty_env_vars_honours_keep() {
+        let names =
+            empty_env_vars::<Args>(&["LISTEN"], fake_env(&[("LISTEN", ""), ("CONNECT", "")]));
+        assert_eq!(names, vec!["CONNECT".to_string()]);
+    }
+
+    #[test]
+    fn empty_env_vars_ignores_unbound_var() {
+        let names = empty_env_vars::<Args>(KEEP, fake_env(&[("NOT_A_RECORDER_ARG", "")]));
+        assert!(
+            names.is_empty(),
+            "unbound variables must never be listed: {names:?}"
+        );
+    }
 
     #[test]
     fn parse_duration_empty() {
