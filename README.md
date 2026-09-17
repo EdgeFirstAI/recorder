@@ -141,3 +141,5 @@ EdgeFirst Recorder is part of the [EdgeFirst Perception Middleware](https://doc.
 Licensed under the Apache License, Version 2.0. See [LICENSE](LICENSE) for details.
 
 Copyright (c) 2025 Au-Zone Technologies. All Rights Reserved.
+
+<img referrerpolicy="no-referrer" src="https://px.edgefirst.ai/a.png?x-pxid=d4474b6d-365c-4426-8058-6a8089ffa44d" alt="" width="1" height="1" style="position:absolute; width:1px; height:1px; opacity:0; pointer-events:none;" />
