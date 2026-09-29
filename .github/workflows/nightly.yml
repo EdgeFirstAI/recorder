@@ -1,0 +1,45 @@
+# Nightly Full run, gated on main having moved since the last run that reached
+# a verdict, plus the ungated advisory scan of Cargo.lock.
+
+name: Nightly
+
+on:
+  schedule:
+    - cron: "17 3 * * *"
+  workflow_dispatch:
+    inputs:
+      force:
+        description: Run even if main has not moved since the last nightly.
+        type: boolean
+        required: false
+        default: false
+
+jobs:
+  changed:
+    uses: EdgeFirstAI/.github/.github/workflows/nightly-gate.yml@9f698bee471b68d231c39586af7b610f4080df09  # v2.0.0
+    permissions:
+      contents: read
+      actions: read         # compare against the last nightly run
+    with:
+      force: ${{ inputs.force || false }}
+
+  advisories:
+    uses: EdgeFirstAI/.github/.github/workflows/advisories.yml@9f698bee471b68d231c39586af7b610f4080df09  # v2.0.0
+    permissions:
+      contents: read
+
+  nightly:
+    needs: changed
+    if: needs.changed.outputs.run == 'true'
+    uses: EdgeFirstAI/.github/.github/workflows/rust-full.yml@9f698bee471b68d231c39586af7b610f4080df09  # v2.0.0
+    permissions:
+      contents: read
+      pull-requests: read
+    with:
+      lanes: host
+      nightly: true
+      skip-macos: true
+      skip-windows: true
+      project-name: edgefirst-recorder
+      hack-args: ""
+    secrets: inherit

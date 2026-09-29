@@ -133,6 +133,10 @@ Add [feature] for [purpose]
 - First line: 50 characters or less
 - Body: Wrap at 72 characters
 
+### Continuous Integration
+
+Open pull requests as drafts while the work is in progress; drafts run no CI. Mark the pull request ready for review to run the Quick tier, and ask a maintainer to add the `ci:full` label for build system, dependency, `unsafe` or platform changes. `ci-gate` is the only required check. See the CI/CD section of [TESTING.md](TESTING.md).
+
 ### Pull Request Checklist
 
 Before submitting, ensure:

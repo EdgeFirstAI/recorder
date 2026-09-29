@@ -1,6 +1,6 @@
 # EdgeFirst MCAP Recorder
 
-[![Build Status](https://github.com/EdgeFirstAI/recorder/workflows/CI/badge.svg)](https://github.com/EdgeFirstAI/recorder/actions)
+[![CI](https://github.com/EdgeFirstAI/recorder/actions/workflows/ci.yml/badge.svg)](https://github.com/EdgeFirstAI/recorder/actions/workflows/ci.yml)
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 [![EdgeFirst](https://img.shields.io/badge/EdgeFirst-Perception-green)](https://doc.edgefirst.ai/perception/)
 
@@ -15,7 +15,8 @@ EdgeFirst Recorder subscribes to Zenoh topics published by the EdgeFirst Percept
 - **MCAP Compression** - Optional LZ4 or Zstd compression for smaller files
 - **Radar Cube Rate Limiting** - Configurable FPS cap for high-bandwidth radar cube data
 - **Storage Monitoring** - Automatic shutdown when disk space runs low
-- **Duration Limits** - Optional time-bounded recording sessions
+- **Duration Limits** - Optional time-bounded recording sessions, measured on the monotonic clock
+- **Clock Step Markers** - Wall-clock steps (e.g. chrony correcting a device without a working RTC) are marked in the MCAP file instead of splitting it
 - **Flexible Zenoh Configuration** - Peer/client modes, custom endpoints, multicast control
 
 ## Supported Topics
@@ -36,7 +37,7 @@ The recorder includes schemas for the following message types:
 
 ### Prerequisites
 
-- Rust toolchain 1.75+ (pinned via `rust-version` in `Cargo.toml`)
+- Rust toolchain 1.88+ (pinned via `rust-version` in `Cargo.toml`)
 - Running EdgeFirst Perception stack (or any Zenoh publisher)
 
 ### Installation
@@ -120,6 +121,8 @@ Recordings are saved as `<hostname>_<timestamp>.mcap` in the current directory, 
 ```
 maivin_2025_06_15_14_30_00.mcap
 ```
+
+Each file contains a `clock_sync` MCAP Metadata record describing the time synchronization state when it was opened (chrony tracking or kernel `adjtimex` state). When the wall clock is stepped during a recording, the recorder keeps writing the same file, adds a `clock_step` Metadata record per step, and shows the step on the Foxglove timeline through a `/clock_step` JSON topic. See [ARCHITECTURE.md](ARCHITECTURE.md#clock-steps) for the record layout.
 
 ## EdgeFirst Ecosystem
 

@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `clock_sync` MCAP Metadata record written when each file is opened, with the chrony tracking state (`chronyc -c -n tracking`) or the kernel `adjtimex` state, `open_realtime_ns`, and `boot_epoch_ns` (EDGEAI-1944).
+- Wall-clock step detection with a `timerfd` (`TFD_TIMER_CANCEL_ON_SET`). Each step larger than 1 s is logged and written as a `clock_step` MCAP Metadata record (`log_time_before`, `log_time_after`, `step_ns`, `monotonic_ns`, `detection`) in the same file (EDGEAI-1944).
+- `/clock_step` JSON topic carrying each clock step for display on the Foxglove timeline (EDGEAI-1944).
+- Once-per-topic warning when `publish_time` differs from `log_time` by more than 10 s; the values are still recorded unchanged (EDGEAI-1944).
+
+### Changed
+
+- Updated all dependencies to their latest releases, including `mcap` 0.25 (default chunk size 1 MiB, header library `mcap-rust/<version>`) and `zenoh` 1.10.1 (EDGEAI-1944).
+- Minimum supported Rust version raised from 1.75 to 1.88, as required by the updated dependency tree (EDGEAI-1944).
+- CI moved to the shared tiered workflows in `EdgeFirstAI/.github` v2.0.0: `ci.yml` (Quick, Full, `ci-gate`), `nightly.yml`, and the release chain `release.yml` (build on `release/X.Y.Z`), `tag-release.yml` (tag on release PR merge) and `publish.yml` (GitHub Release on tag). The previous `build.yml`, `test.yml`, `sbom.yml` and tag-triggered release, and the local SBOM and license scripts, are removed. Releases are no longer tagged by hand.
+- Added `rust-toolchain.toml`, `.github/CODEOWNERS`, `.github/dependabot.yml` and `.github/copilot-instructions.md`.
+
+### Fixed
+
+- `--duration` is measured on the monotonic clock, so a wall-clock step no longer ends a recording early or extends it (EDGEAI-1944).
+- The recorder no longer panics when the system clock is set before the UNIX epoch (EDGEAI-1944).
+
 ## [1.10.1] - 2026-09-07
 
 Patch release for EDGEAI-1094. Argument parsing only; no wire-format or
