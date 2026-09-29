@@ -13,7 +13,9 @@ use args::Args;
 use bus::{Bus, BusReader};
 use chrono::Local;
 use clap::Parser;
-use clock::{ClockStep, ClockTracker, Detection, StepWatcher, SystemClock};
+use clock::{
+    ClockSource, ClockStep, ClockTracker, Detection, OffsetSample, StepWatcher, SystemClock,
+};
 use log::{debug, error, info, warn};
 use mcap::{records::MessageHeader, WriteOptions};
 use signal_hook::{consts::signal::*, iterator::Signals};
@@ -41,6 +43,9 @@ const CHANNEL_CAPACITY: usize = 64;
 /// as suspect. The value is still recorded unchanged.
 const SKEW_WARN_NS: u64 = 10 * NANOS_PER_SEC;
 
+/// A topic silent for this long is reported and the wait restarts.
+const IDLE_WARN_AFTER: Duration = Duration::from_secs(10);
+
 fn timestamp_nanos() -> u64 {
     nanos_since_epoch(SystemTime::now())
 }
@@ -61,6 +66,15 @@ fn duration_reached(elapsed: Duration, limit_secs: Option<u64>) -> bool {
     limit_secs.is_some_and(|secs| elapsed >= Duration::from_secs(secs))
 }
 
+/// Longest wait for one sample: the idle warning interval, shortened to what
+/// remains of `--duration` so an idle topic still stops on time.
+fn receive_timeout(elapsed: Duration, limit_secs: Option<u64>) -> Duration {
+    match limit_secs {
+        Some(secs) => IDLE_WARN_AFTER.min(Duration::from_secs(secs).saturating_sub(elapsed)),
+        None => IDLE_WARN_AFTER,
+    }
+}
+
 fn warn_clock_step(step: &ClockStep) {
     warn!(
         "Clock step of {:+.3}s detected ({:?}); recording continues in the same file",
@@ -71,8 +85,11 @@ fn warn_clock_step(step: &ClockStep) {
 
 /// Starts clock step detection. Returns a tracker for per-message checks
 /// when the timerfd is unavailable.
-fn start_clock_watch(tx: mpsc::Sender<ClockStep>) -> Option<ClockTracker<SystemClock>> {
-    let mut tracker = ClockTracker::new(SystemClock);
+fn start_clock_watch(
+    tx: mpsc::Sender<ClockStep>,
+    baseline: OffsetSample,
+) -> Option<ClockTracker<SystemClock>> {
+    let mut tracker = ClockTracker::with_baseline(SystemClock, baseline);
     let watcher = match StepWatcher::new() {
         Ok(watcher) => watcher,
         Err(e) => {
@@ -244,17 +261,20 @@ fn record_topic(
             break;
         }
 
-        let sample = match subscriber.recv_timeout(Duration::from_secs(10)) {
-            Ok(sample) => sample,
-            Err(_) => {
-                warn!("No data received on {topic} for 10s, retrying...");
+        if duration_reached(rec.start.elapsed(), rec.duration_secs) {
+            debug!("Duration limit reached for {topic}");
+            break;
+        }
+
+        let wait = receive_timeout(rec.start.elapsed(), rec.duration_secs);
+        let sample = match subscriber.recv_timeout(wait) {
+            Ok(Some(sample)) => sample,
+            Ok(None) | Err(_) => {
+                if wait == IDLE_WARN_AFTER {
+                    warn!("No data received on {topic} for 10s, retrying...");
+                }
                 continue;
             }
-        };
-
-        let sample = match sample {
-            Some(sample) => sample,
-            None => continue,
         };
 
         // Rate limiting for high-bandwidth topics (e.g. radar cube)
@@ -307,11 +327,6 @@ fn record_topic(
         }
 
         sequence += 1;
-
-        if duration_reached(rec.start.elapsed(), rec.duration_secs) {
-            debug!("Duration limit reached for {topic}");
-            break;
-        }
     }
 }
 
@@ -522,9 +537,10 @@ async fn run() -> Result<()> {
 
     // Watch for steps before querying chrony, which can take seconds while
     // chronyd is starting and about to step the clock.
+    let open = SystemClock.sample();
     let (clock_tx, clock_rx) = mpsc::channel();
-    let clock_fallback = start_clock_watch(clock_tx);
-    let clock_sync = clock::clock_sync();
+    let clock_fallback = start_clock_watch(clock_tx, open);
+    let clock_sync = clock::clock_sync(open);
     info!(
         "Clock: synchronized={} (source: {})",
         clock_sync.metadata["synchronized"], clock_sync.metadata["source"]
@@ -760,6 +776,23 @@ mod time_tests {
         assert!(publish_time_skewed(now, now - SKEW_WARN_NS - 1));
         assert!(publish_time_skewed(now, now + SKEW_WARN_NS + 1));
         assert!(publish_time_skewed(now, now - 41_054_973 * NANOS_PER_SEC));
+    }
+
+    #[test]
+    fn receive_timeout_is_capped_by_remaining_duration() {
+        assert_eq!(receive_timeout(Duration::ZERO, None), IDLE_WARN_AFTER);
+        assert_eq!(
+            receive_timeout(Duration::from_secs(1), Some(60)),
+            IDLE_WARN_AFTER
+        );
+        assert_eq!(
+            receive_timeout(Duration::from_millis(57_500), Some(60)),
+            Duration::from_millis(2_500)
+        );
+        assert_eq!(
+            receive_timeout(Duration::from_secs(61), Some(60)),
+            Duration::ZERO
+        );
     }
 
     #[test]

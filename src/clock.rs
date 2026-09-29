@@ -366,8 +366,7 @@ fn run_with_timeout(mut cmd: Command, timeout: Duration) -> Option<String> {
 }
 
 /// Captures the clock state for the `clock_sync` record at file open.
-pub fn clock_sync() -> Metadata {
-    let open = SystemClock.sample();
+pub fn clock_sync(open: OffsetSample) -> Metadata {
     let mut cmd = Command::new("chronyc");
     cmd.args(["-c", "-n", "tracking"]);
     let chrony = run_with_timeout(cmd, CHRONYC_TIMEOUT)
@@ -384,11 +383,12 @@ pub struct ClockTracker<S: ClockSource> {
 }
 
 impl<S: ClockSource> ClockTracker<S> {
-    pub fn new(mut source: S) -> Self {
-        let last_offset_ns = source.sample().offset_ns;
+    /// Starts from a measurement taken elsewhere, so a record describing the
+    /// same instant (such as `clock_sync`) shares its baseline.
+    pub fn with_baseline(source: S, baseline: OffsetSample) -> Self {
         Self {
             source,
-            last_offset_ns,
+            last_offset_ns: baseline.offset_ns,
         }
     }
 
@@ -702,8 +702,28 @@ mod tests {
     }
 
     #[test]
+    fn with_baseline_compares_against_the_given_sample() {
+        let baseline = OffsetSample {
+            offset_ns: EPOCH_2026 - DAYS_475,
+            monotonic_ns: 1,
+        };
+        let mut t = ClockTracker::with_baseline(Scripted::new(&[(EPOCH_2026, 2)]), baseline);
+        let step = t
+            .check(Detection::Timerfd)
+            .expect("step from the given baseline");
+        assert_eq!(step.step_ns, DAYS_475);
+    }
+
+    /// A tracker whose baseline is the first scripted sample.
+    fn tracker(samples: &[(i64, u64)]) -> ClockTracker<Scripted> {
+        let mut source = Scripted::new(samples);
+        let baseline = source.sample();
+        ClockTracker::with_baseline(source, baseline)
+    }
+
+    #[test]
     fn stable_offset_is_not_a_step() {
-        let mut t = ClockTracker::new(Scripted::new(&[(EPOCH_2026, 10), (EPOCH_2026 + 50, 20)]));
+        let mut t = tracker(&[(EPOCH_2026, 10), (EPOCH_2026 + 50, 20)]);
         assert_eq!(t.check(Detection::Sample), None);
     }
 
@@ -711,10 +731,7 @@ mod tests {
     fn forward_step_reports_before_and_after_in_log_time() {
         let before = EPOCH_2026 - DAYS_475;
         let mono = 41_400_000_000u64;
-        let mut t = ClockTracker::new(Scripted::new(&[
-            (before, 13_000_000_000),
-            (EPOCH_2026, mono),
-        ]));
+        let mut t = tracker(&[(before, 13_000_000_000), (EPOCH_2026, mono)]);
         let step = t.check(Detection::Timerfd).expect("step");
         assert_eq!(step.step_ns, DAYS_475);
         assert_eq!(step.monotonic_ns, mono);
@@ -725,10 +742,7 @@ mod tests {
 
     #[test]
     fn backward_step_has_negative_step_ns() {
-        let mut t = ClockTracker::new(Scripted::new(&[
-            (EPOCH_2026, 1),
-            (EPOCH_2026 - DAYS_475, 2),
-        ]));
+        let mut t = tracker(&[(EPOCH_2026, 1), (EPOCH_2026 - DAYS_475, 2)]);
         let step = t.check(Detection::Sample).expect("step");
         assert_eq!(step.step_ns, -DAYS_475);
         assert!(step.log_time_after < step.log_time_before);
@@ -736,32 +750,29 @@ mod tests {
 
     #[test]
     fn change_at_or_below_threshold_is_ignored() {
-        let mut t = ClockTracker::new(Scripted::new(&[
+        let mut t = tracker(&[
             (EPOCH_2026, 1),
             (EPOCH_2026 + 500_000_000, 2),
             (EPOCH_2026 + 500_000_000 + STEP_THRESHOLD_NS, 3),
-        ]));
+        ]);
         assert_eq!(t.check(Detection::Sample), None);
         assert_eq!(t.check(Detection::Sample), None);
     }
 
     #[test]
     fn baseline_follows_each_measurement() {
-        let mut t = ClockTracker::new(Scripted::new(&[
+        let mut t = tracker(&[
             (EPOCH_2026, 1),
             (EPOCH_2026 + DAYS_475, 2),
             (EPOCH_2026 + DAYS_475, 3),
-        ]));
+        ]);
         assert!(t.check(Detection::Timerfd).is_some());
         assert_eq!(t.check(Detection::Timerfd), None);
     }
 
     #[test]
     fn pre_epoch_log_time_saturates_at_zero() {
-        let mut t = ClockTracker::new(Scripted::new(&[
-            (-5 * STEP_THRESHOLD_NS, 1),
-            (EPOCH_2026, 2),
-        ]));
+        let mut t = tracker(&[(-5 * STEP_THRESHOLD_NS, 1), (EPOCH_2026, 2)]);
         let step = t.check(Detection::Sample).expect("step");
         assert_eq!(step.log_time_before, 0);
     }

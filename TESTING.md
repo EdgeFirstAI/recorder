@@ -211,7 +211,7 @@ CI calls the shared tiered workflows in [EdgeFirstAI/.github](https://github.com
 
 | Tier | Runs when | What |
 |------|-----------|------|
-| Quick | every push to a ready (non-draft) pull request, and pushes to `main` | `cargo fmt --check`, clippy (host and aarch64 check), `cargo nextest`, dependency license policy, NOTICE validation, workflow lint |
+| Quick | every push to a ready (non-draft) pull request, and pushes to `main`, that changes code, build or CI files (documentation-only changes skip it and `ci-gate` still passes) | `cargo fmt --check`, clippy (host and aarch64 check), `cargo nextest`, dependency license policy, NOTICE validation, workflow lint |
 | Full | the `ci:full` label, a merge queue batch, or a manual dispatch | Linux x86_64 and aarch64 tests with coverage, SonarCloud, full source SBOM |
 | Nightly | daily, only when `main` moved | Full, plus the ungated `cargo audit` advisory scan |
 | Release | push to `release/X.Y.Z` | version and CHANGELOG checks, SBOM, zigbuild binaries for x86_64 and aarch64; the merge tags `vX.Y.Z` and `publish.yml` attaches the artifacts to the GitHub Release |

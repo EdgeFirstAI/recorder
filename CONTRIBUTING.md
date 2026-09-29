@@ -31,7 +31,7 @@ EdgeFirst Recorder is an MCAP data recording node for the EdgeFirst Perception s
 
 ### Prerequisites
 
-- **Rust**: 1.75 or later (pinned via `rust-version` in `Cargo.toml`; [install instructions](https://rustup.rs/))
+- **Rust**: 1.88 or later (pinned via `rust-version` in `Cargo.toml`; [install instructions](https://rustup.rs/))
 - **Git**: For version control
 
 ### Clone and Build
@@ -135,7 +135,7 @@ Add [feature] for [purpose]
 
 ### Continuous Integration
 
-Open pull requests as drafts while the work is in progress; drafts run no CI. Mark the pull request ready for review to run the Quick tier, and ask a maintainer to add the `ci:full` label for build system, dependency, `unsafe` or platform changes. `ci-gate` is the only required check. See the CI/CD section of [TESTING.md](TESTING.md).
+Open pull requests as drafts while the work is in progress; drafts run no CI. Mark the pull request ready for review to run the Quick tier on changes to code, build or CI files, and ask a maintainer to add the `ci:full` label for build system, dependency, `unsafe` or platform changes. `ci-gate` is the only required check. See the CI/CD section of [TESTING.md](TESTING.md).
 
 ### Pull Request Checklist
 

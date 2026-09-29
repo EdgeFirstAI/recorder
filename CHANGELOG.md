@@ -23,7 +23,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- `--duration` is measured on the monotonic clock, so a wall-clock step no longer ends a recording early or extends it (EDGEAI-1944).
+- `--duration` is measured on the monotonic clock, so a wall-clock step no longer ends a recording early or extends it, and it now also stops a recording whose topics have gone silent (EDGEAI-1944).
 - The recorder no longer panics when the system clock is set before the UNIX epoch (EDGEAI-1944).
 
 ## [1.10.1] - 2026-09-07
