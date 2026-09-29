@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.11.0] - 2026-09-29
+
 ### Added
 
 - `clock_sync` MCAP Metadata record written when each file is opened, with the chrony tracking state (`chronyc -c -n tracking`) or the kernel `adjtimex` state, `open_realtime_ns`, and `boot_epoch_ns` (EDGEAI-1944).
