@@ -67,6 +67,8 @@ graph TB
     SIG -->|Broadcast Bus| T1 & T2 & T3
 ```
 
+A clock-watch thread blocks on a Linux `timerfd` and wakes only when `CLOCK_REALTIME` is set discontinuously (see [Clock Steps](#clock-steps)). It sends detected steps to the writer on a dedicated unbounded channel, so it never holds the message channel open during shutdown.
+
 ### Why Per-Topic Threads?
 
 Zenoh subscribers use blocking `recv_timeout` for receiving samples. Dedicating a thread per topic avoids one slow topic blocking others. Each thread runs a minimal single-threaded Tokio runtime solely for the async `declare_subscriber` call.
@@ -99,7 +101,10 @@ sequenceDiagram
         ZENOH-->>MAIN: Encoding (schema name)
     end
 
-    MAIN->>MCAP: Create file, register schemas & channels
+    MAIN->>MCAP: Create file
+    MAIN->>MAIN: Start clock-watch thread
+    MAIN->>MCAP: Write clock_sync metadata
+    MAIN->>MCAP: Register schemas & channels
     MAIN->>MAIN: Spawn per-topic threads
     MAIN->>MCAP: Writer loop (receive & write)
 ```
@@ -123,7 +128,8 @@ sequenceDiagram
 
         REC->>REC: Extract payload, timestamp
         REC->>CH: send(header, data)
-        CH->>WRITER: recv()
+        CH->>WRITER: recv_timeout(1s)
+        WRITER->>WRITER: Write pending clock steps
         WRITER->>WRITER: Write to MCAP
 
         alt Every 5 seconds
@@ -208,6 +214,45 @@ MCAP records two timestamps per message. The recorder sets them as follows:
 
 Source-stamping requires the publisher to attach a Zenoh timestamp (e.g. via `put(..., timestamp=...)`); without it, `publish_time == log_time` and the MCAP loses producer-side timing but remains playable.
 
+The first time a topic's `publish_time` differs from `log_time` by more than 10 s, the recorder logs a warning for that topic. The values are still recorded unchanged so the fault stays visible in the file.
+
+The `--duration` limit and all internal intervals are measured on the monotonic clock (`Instant`), so a wall-clock step neither ends a recording early nor extends it.
+
+### Clock Steps
+
+Devices without a working RTC boot with a wrong wall clock that chrony later steps, possibly by months, at any time during a recording. The recorder keeps writing the same file and marks the step so consumers can treat it as a boundary between two internally consistent segments.
+
+**Detection.** The clock-watch thread owns a `timerfd` on `CLOCK_REALTIME` armed with `TFD_TIMER_ABSTIME | TFD_TIMER_CANCEL_ON_SET` and an expiry at the end of `time_t`. `read()` fails with `ECANCELED` whenever `CLOCK_REALTIME - CLOCK_MONOTONIC` changes discontinuously: `settimeofday`/`clock_settime`, `adjtimex(ADJ_SETOFFSET)` (chrony's step), a kernel leap second, or resume from suspend. Slews never trigger it. `CLOCK_MONOTONIC` does not advance while suspended, so a suspend longer than 1 s is recorded as a forward step of its duration; Maivin devices do not suspend. The kernel refreshes the fd's reference offset when it reports `ECANCELED`, so the fd is kept and never re-armed; several steps between two reads are reported once.
+
+After each wake-up the thread measures `CLOCK_REALTIME - CLOCK_MONOTONIC`. The two clocks cannot be read atomically, so it reads REALTIME, MONOTONIC, REALTIME and compares the monotonic value with the midpoint of the two realtime reads, retrying while the bracket exceeds 10 µs. A change larger than 1 s since the previous measurement is a step. Slews move both clocks together, so only steps change the offset. If the `timerfd` cannot be created, the writer measures the offset before every message instead.
+
+**`clock_step` metadata.** Each step is written as an MCAP Metadata record named `clock_step`. MCAP Metadata has no timestamp field and carries only strings, so the instant is in the values:
+
+| Key | Value |
+|-----|-------|
+| `log_time_before` | Wall time just before the step, ns since the UNIX epoch |
+| `log_time_after` | Wall time just after the step, ns since the UNIX epoch |
+| `step_ns` | Signed step size in ns (`log_time_after - log_time_before`) |
+| `monotonic_ns` | `CLOCK_MONOTONIC` when the step was detected, ns |
+| `detection` | `timerfd`, or `sample` when found by an offset comparison |
+
+A file holds one `clock_step` record per step, all with the same name. Readers should enumerate the summary's Metadata Index records (mcap-rs `Summary::metadata_indexes` with `mcap::read::metadata`). A file without a summary, for example after power loss, must be scanned linearly (`LinearReader` with `Options::IgnoreEndMagic`); `MessageStream` skips Metadata records. The `mcap` CLI `get metadata` command merges records that share a name.
+
+**`/clock_step` channel.** Foxglove shows Metadata records as recording-level context, not on the timeline, so each step is also written as a JSON message on the root topic `/clock_step` (schema `edgefirst/ClockStep`, encoding `jsonschema`, message encoding `json`) with `log_time = publish_time = log_time_after`. The channel is created on the first step, so recordings without steps do not contain it. The Metadata record is authoritative. Consumers that replay or convert recordings must skip this channel.
+
+**`clock_sync` metadata.** One record named `clock_sync` is written when the file is opened:
+
+| Key | Value |
+|-----|-------|
+| `open_realtime_ns` | `CLOCK_REALTIME` at file open, ns |
+| `boot_epoch_ns` | `CLOCK_REALTIME - CLOCK_MONOTONIC` at file open: the wall time of boot. Adding `step_ns` of each earlier `clock_step` maps any later `monotonic_ns` to wall time |
+| `synchronized` | `true`, `false`, or `unknown` |
+| `source` | `chronyc`, `adjtimex`, or `none` |
+| `reference_id`, `reference_name`, `stratum`, `system_time_offset_s`, `root_dispersion_s`, `leap_status` | From `chronyc -c -n tracking`, when chrony answers within 2 s |
+| `kernel_unsync`, `maxerror_us`, `esterror_us` | From `adjtimex` with `modes = 0` |
+
+`synchronized` comes from chrony's leap status when chrony answers, and from the kernel `STA_UNSYNC` flag otherwise. Chrony clears `STA_UNSYNC` only when `rtcsync` is enabled and every step sets it again, so the kernel flag alone under-reports synchronization. `chronyc tracking` works unprivileged over 127.0.0.1:323 unless chrony runs with `cmdport 0`.
+
 ---
 
 ## Key Design Decisions
@@ -220,6 +265,9 @@ Source-stamping requires the publisher to attach a Zenoh timestamp (e.g. via `pu
 | **Compile-time schemas** | No filesystem dependencies at runtime; single static binary |
 | **Broadcast bus for shutdown** | Simple fan-out signal to all threads without shared atomics |
 | **`SyncSender` not `Sender`** | Bounded channel for backpressure; blocks producer if writer falls behind |
+| **One file per recording across clock steps** | A step is marked with `clock_step` metadata, never split, so a recording stays one artifact and consumers segment it |
+| **`timerfd` for clock steps** | Event-driven, no polling; the same kernel mechanism systemd uses to notice time changes |
+| **Separate channel for clock steps** | The watcher never keeps the message channel open, so shutdown still completes when all topic threads exit |
 
 ---
 
@@ -238,5 +286,6 @@ Source-stamping requires the publisher to attach a Zenoh timestamp (e.g. via `pu
 | `chrono` | Timestamp formatting for filenames |
 | `log`, `env_logger` | Logging facade and environment-driven logger |
 | `hostname` | Host name lookup for MCAP filenames |
-| `serde_json` | Zenoh configuration JSON5 snippets |
+| `serde_json` | Zenoh configuration JSON5 snippets and `/clock_step` messages |
+| `libc` | `timerfd`, `clock_gettime`, and `adjtimex` for clock step detection |
 | `include_walk` (build-dep) | Compile-time schema discovery |

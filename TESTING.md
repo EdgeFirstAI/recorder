@@ -38,6 +38,19 @@ The tests cover CLI argument parsing and validation:
 | `cube_fps_zero_is_none` | `MAX` resolves to no rate limiting |
 | `cube_fps_value` | Numeric FPS resolves to the specified value |
 
+The clock step and MCAP output tests (`clock::tests`, `sink::tests`, `time_tests`) cover:
+
+| Area | Validates |
+|------|-----------|
+| Offset measurement | Midpoint of the REALTIME/MONOTONIC/REALTIME bracket, retry of wide brackets, tightest bracket kept |
+| Step tracking | Forward and backward steps, the 1 s threshold, baseline update, pre-epoch saturation |
+| `timerfd` | The fd is created with `TFD_TIMER_CANCEL_ON_SET` and stays quiet without a clock change |
+| `clock_sync` | chronyc CSV parsing, chrony vs adjtimex source selection, unprivileged `adjtimex`, chronyc timeout |
+| MCAP round trip | `clock_step` records indexed in the summary, `/clock_step` JSON messages at `log_time_after`, no channel without steps, records found by a linear scan when the summary is missing |
+| Time helpers | No panic on a pre-epoch clock, the 10 s publish-time skew threshold, `--duration` on elapsed monotonic time |
+
+A real clock step needs `CAP_SYS_TIME` (time namespaces cannot offset `CLOCK_REALTIME`), so it is covered by the on-target scenario below.
+
 ### Running with Coverage
 
 ```bash
@@ -145,6 +158,32 @@ edgefirst-recorder --duration 5
 
 Verify the recorder stops after approximately 5 seconds and the MCAP file is properly finalized.
 
+### Clock Steps (on target)
+
+Run on a Maivin with root access. Stepping the clock affects every service on the device.
+
+```bash
+# 1. Stop time synchronization and move the clock 475 days back
+sudo systemctl stop chronyd
+sudo date -s "-475 days"
+
+# 2. Record while the clock is stepped forward, then backward
+edgefirst-recorder --duration 60 &
+sleep 10; sudo date -s "+475 days"
+sleep 10; sudo date -s "-1 hour"
+wait
+
+# 3. Restore time synchronization
+sudo systemctl start chronyd && sudo chronyc makestep
+```
+
+Verify:
+
+- The recorder log shows one `Clock step of ...` warning per step and `Saved MCAP ... (2 clock steps)`.
+- `mcap info` reports a single file with `metadata: 3` (one `clock_sync`, two `clock_step`), and `mcap list metadata` lists them.
+- In Foxglove, the `/clock_step` topic shows two messages at the step instants, and the recording still covers the full 60 s of monotonic time.
+- Without steps, no `/clock_step` topic is present.
+
 ### Storage Directory
 
 ```bash
@@ -168,12 +207,16 @@ edgefirst-recorder --no-multicast-scouting --connect tcp/localhost:7447
 
 ## CI/CD
 
-The CI pipeline runs on every push and pull request:
+CI calls the shared tiered workflows in [EdgeFirstAI/.github](https://github.com/EdgeFirstAI/.github). `ci-gate` is the only required check.
 
-1. **Format check** - `cargo fmt --check`
-2. **Clippy** - `cargo clippy -- -D warnings`
-3. **Unit tests** - `cargo test`
-4. **Build** - Release build for `x86_64` and `aarch64`
+| Tier | Runs when | What |
+|------|-----------|------|
+| Quick | every push to a ready (non-draft) pull request, and pushes to `main`, that changes code, build or CI files (documentation-only changes skip it and `ci-gate` still passes) | `cargo fmt --check`, clippy (host and aarch64 check), `cargo nextest`, dependency license policy, NOTICE validation, workflow lint |
+| Full | the `ci:full` label, a merge queue batch, or a manual dispatch | Linux x86_64 and aarch64 tests with coverage, SonarCloud, full source SBOM |
+| Nightly | daily, only when `main` moved | Full, plus the ungated `cargo audit` advisory scan |
+| Release | push to `release/X.Y.Z` | version and CHANGELOG checks, SBOM, zigbuild binaries for x86_64 and aarch64; the merge tags `vX.Y.Z` and `publish.yml` attaches the artifacts to the GitHub Release |
+
+Draft pull requests run nothing; mark the PR ready for review to run Quick.
 
 Manual Foxglove verification is performed before each release using the workflow described above.
 

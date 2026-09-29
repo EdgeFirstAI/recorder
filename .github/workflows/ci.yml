@@ -1,0 +1,106 @@
+# Tiered CI (EAM "CICD Pipelines", SPS 11). Quick runs on every push to a
+# ready pull request and on main; Full runs when a reviewer adds `ci:full`,
+# on a merge queue batch, or on dispatch. `ci-gate` is the only required
+# check. Draft pull requests run nothing; mark the PR ready to run Quick.
+#
+# The recorder is Linux-only (timerfd, signal handling) and has no on-target
+# test lane, so Full runs the host lanes without macOS, Windows or boards.
+
+name: CI
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review, labeled]
+  merge_group:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      full:
+        type: boolean
+        default: false
+
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  changes:
+    if: github.event.pull_request.draft != true
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read        # checkout
+      pull-requests: read   # paths-filter compares the PR through the API
+    outputs:
+      code: ${{ steps.f.outputs.code }}
+      full: ${{ steps.mode.outputs.full }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+
+      - uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d  # v4.0.3
+        id: f
+        with:
+          filters: |
+            code:
+              - 'src/**'
+              - 'tests/**'
+              - 'build.rs'
+              - 'Cargo.*'
+              - 'rust-toolchain.toml'
+              - 'rustfmt.toml'
+              - '.config/**'
+              - 'NOTICE'
+              - 'sonar-project.properties'
+              - '.github/**'
+
+      - id: mode
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          LABELS: ${{ join(github.event.pull_request.labels.*.name, ',') }}
+          DISPATCH_FULL: ${{ inputs.full }}
+        run: |
+          full=false
+          case "$EVENT_NAME" in
+            merge_group) full=true ;;
+            workflow_dispatch) full="$DISPATCH_FULL" ;;
+          esac
+          case ",$LABELS," in *,ci:full,*) full=true ;; esac
+          echo "full=$full" >> "$GITHUB_OUTPUT"
+
+  quick:
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
+    uses: EdgeFirstAI/.github/.github/workflows/rust-quick.yml@9f698bee471b68d231c39586af7b610f4080df09  # v2.0.0
+    permissions:
+      contents: read
+    with:
+      project-name: edgefirst-recorder
+
+  full:
+    needs: changes
+    if: needs.changes.outputs.full == 'true'
+    uses: EdgeFirstAI/.github/.github/workflows/rust-full.yml@9f698bee471b68d231c39586af7b610f4080df09  # v2.0.0
+    permissions:
+      contents: read
+      pull-requests: read   # SonarCloud pull request decoration
+    with:
+      lanes: host
+      skip-macos: true
+      skip-windows: true
+      project-name: edgefirst-recorder
+      # No cargo features, so the feature-powerset lane has nothing to check.
+      hack-args: ""
+    secrets: inherit
+
+  ci-gate:
+    if: always()
+    needs: [changes, quick, full]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 2
+    permissions: {}
+    steps:
+      - env:
+          RESULTS: ${{ toJSON(needs) }}
+        run: |
+          echo "$RESULTS" | jq -e 'to_entries | all(.value.result == "success" or .value.result == "skipped")'

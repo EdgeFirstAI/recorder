@@ -1,0 +1,35 @@
+# Release chain step 3 of 3: publish the artifacts release.yml built for this
+# tag's tree to a GitHub Release. Builds nothing.
+#
+# Before the first tag on this chain, rehearse against a green release branch:
+#   gh workflow run publish.yml --ref release/X.Y.Z -f tag=vX.Y.Z
+
+name: Publish
+
+on:
+  push:
+    tags: ['v*.*.*']              # vX.Y.Z and vX.Y.Z-rcN
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Tag to rehearse, e.g. v1.11.0 (publishes nothing)'
+        required: true
+        type: string
+
+concurrency:
+  group: publish-${{ github.ref }}
+  cancel-in-progress: false       # a half-finished publish cannot be recovered
+
+jobs:
+  publish:
+    uses: EdgeFirstAI/.github/.github/workflows/publish-rust.yml@9f698bee471b68d231c39586af7b610f4080df09  # v2.0.0
+    with:
+      tag: ${{ inputs.tag }}
+      build-workflow: release.yml
+      project-name: edgefirst-recorder
+      publish-crates: false
+    permissions:
+      contents: write             # create the GitHub Release
+      actions: read               # read the release.yml run and its artifacts
+      id-token: write             # declared by the shared crates.io job
+    secrets: inherit

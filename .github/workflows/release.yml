@@ -1,215 +1,81 @@
-# GitHub Actions workflow for publishing releases
-#
-# This workflow publishes release artifacts when a version tag is pushed.
-# It does NOT rebuild artifacts — instead it waits for the build.yml and
-# sbom.yml workflows (triggered by the same commit on main) to complete,
-# then downloads their artifacts for the GitHub Release.
-#
-# Release Process:
-# 1. Update version in Cargo.toml and CHANGELOG.md
-# 2. Commit and push to main
-# 3. Tag: git tag -a -s -m "Version X.Y.Z" vX.Y.Z && git push origin vX.Y.Z
-#
-# Action Versions (hash-pinned per SPS v2.1):
-# - actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 (v4)
-# - lewagon/wait-on-check-action@ccfb013c15c8afb7bf2b7c028fb74dc5a068cccc (v1.3.4)
-# - dawidd6/action-download-artifact@bf251b5aa9c2f7eeb574a96ee720e24f801b7c11 (v6)
-# - softprops/action-gh-release@a06a81a03ee405af7f2048a818ed3f03bbf83c7b (v2)
+# Release chain step 1 of 3: build every artifact the release ships on push to
+# release/X.Y.Z. Nothing is published here; publish.yml attaches these
+# artifacts to the GitHub Release when tag-release.yml tags the merge.
 
-name: Release
+name: Release Build
 
 on:
   push:
-    tags: ['v*']
+    branches: ['release/*.*.*']   # release/X.Y.Z and release/X.Y.Z-rcN
+  workflow_dispatch:              # rebuild a release branch on demand
+
+concurrency:
+  group: release-build-${{ github.ref }}
+  cancel-in-progress: true        # a fixup commit supersedes the build it interrupts
 
 jobs:
-  # ==========================================================================
-  # Prepare Release Information
-  # ==========================================================================
-  prepare-release:
-    name: Prepare Release Information
-    runs-on: ubuntu-22.04
-    outputs:
-      version: ${{ steps.version.outputs.version }}
-      changelog: ${{ steps.changelog.outputs.changelog }}
-
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4
-        with:
-          fetch-depth: 0
-
-      - name: Extract version from tag
-        id: version
-        run: |
-          VERSION=${GITHUB_REF#refs/tags/v}
-          echo "version=$VERSION" >> $GITHUB_OUTPUT
-          echo "Extracted version: $VERSION"
-
-      - name: Extract changelog for this version
-        id: changelog
-        run: |
-          VERSION=${GITHUB_REF#refs/tags/v}
-
-          CHANGELOG=$(awk -v ver="$VERSION" '
-            /^## \['"$VERSION"'\]/ { found=1; next }
-            found && /^## \[/ { exit }
-            found { print }
-          ' CHANGELOG.md)
-
-          if [ -z "$CHANGELOG" ]; then
-            echo "ERROR: No changelog entry found for version $VERSION"
-            exit 1
-          fi
-
-          echo "changelog<<EOF" >> $GITHUB_OUTPUT
-          echo "$CHANGELOG" >> $GITHUB_OUTPUT
-          echo "EOF" >> $GITHUB_OUTPUT
-
-          echo "Extracted changelog:"
-          echo "$CHANGELOG"
-
-  # ==========================================================================
-  # Wait for CI Workflows to Complete
-  # ==========================================================================
-  wait-for-ci:
-    name: Wait for CI Workflows
-    needs: [prepare-release]
-    runs-on: ubuntu-22.04
-    steps:
-      - name: Wait for build and SBOM checks
-        uses: lewagon/wait-on-check-action@ccfb013c15c8afb7bf2b7c028fb74dc5a068cccc  # v1.3.4
-        with:
-          ref: ${{ github.sha }}
-          running-workflow-name: 'Wait for CI Workflows'
-          # Release only needs build + SBOM artifacts. Waiting on SonarCloud (or
-          # other quality checks) previously blocked publishing when the quality
-          # gate failed on main despite green package builds.
-          check-regexp: '(Build Packages|Verify Builds|Generate SBOM)'
-          repo-token: ${{ secrets.GITHUB_TOKEN }}
-          wait-interval: 10
-
-  # ==========================================================================
-  # Create GitHub Release with pre-built artifacts
-  # ==========================================================================
-  create-github-release:
-    name: Create GitHub Release
-    runs-on: ubuntu-22.04
-    needs:
-      - prepare-release
-      - wait-for-ci
+  # Version against the branch name, the CHANGELOG section publish.yml needs,
+  # and the full SBOM. The recorder ships binaries, not crates.
+  verify:
+    uses: EdgeFirstAI/.github/.github/workflows/release-rust.yml@9f698bee471b68d231c39586af7b610f4080df09  # v2.0.0
     permissions:
-      contents: write
-      actions: read
+      contents: read
+    with:
+      project-name: edgefirst-recorder
+      sbom: true
+      package-crates: false
+    secrets: inherit
 
+  # Linux binaries linked against glibc 2.17 (manylinux2014) with
+  # cargo-zigbuild, so one binary runs on every supported distribution.
+  build:
+    needs: verify
+    name: Build ${{ matrix.arch }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x86_64
+            target: x86_64-unknown-linux-gnu
+          - arch: aarch64
+            target: aarch64-unknown-linux-gnu
     steps:
-      - name: Checkout code
-        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
 
-      - name: Download x86_64 package
-        uses: dawidd6/action-download-artifact@bf251b5aa9c2f7eeb574a96ee720e24f801b7c11  # v6
+      - uses: EdgeFirstAI/.github/.github/actions/setup-rust@9f698bee471b68d231c39586af7b610f4080df09  # v2.0.0
         with:
-          workflow: build.yml
-          commit: ${{ github.sha }}
-          name: packages-x86_64
-          path: artifacts/packages-x86_64
+          components: ""
+          targets: ${{ matrix.target }}
+          tools: cargo-zigbuild
+          cache-key: release-${{ matrix.arch }}
+          save-cache: "false"
 
-      - name: Download aarch64 package
-        uses: dawidd6/action-download-artifact@bf251b5aa9c2f7eeb574a96ee720e24f801b7c11  # v6
+      - uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29  # v2.2.1
         with:
-          workflow: build.yml
-          commit: ${{ github.sha }}
-          name: packages-aarch64
-          path: artifacts/packages-aarch64
+          version: 0.16.0
+          use-cache: false
 
-      - name: Download SBOM
-        uses: dawidd6/action-download-artifact@bf251b5aa9c2f7eeb574a96ee720e24f801b7c11  # v6
-        with:
-          workflow: sbom.yml
-          commit: ${{ github.sha }}
-          name: sbom
-          path: artifacts/sbom
-
-      - name: Organize release assets
+      - name: Build
         env:
-          VERSION: ${{ needs.prepare-release.outputs.version }}
+          ARCH: ${{ matrix.arch }}
+          TARGET: ${{ matrix.target }}
+          VERSION: ${{ needs.verify.outputs.version }}
         run: |
-          mkdir -p release-assets
-
-          # Copy x86_64 binary
-          if [ -f artifacts/packages-x86_64/edgefirst-recorder-x86_64 ]; then
-            cp artifacts/packages-x86_64/edgefirst-recorder-x86_64 \
-               "release-assets/edgefirst-recorder-v${VERSION}-linux-x86_64"
-            echo "✓ x86_64 binary"
-          else
-            echo "ERROR: x86_64 binary not found"
-            exit 1
+          cargo zigbuild --release --locked --target "$TARGET.2.17"
+          mkdir -p dist
+          cp "target/$TARGET/release/edgefirst-recorder" "dist/edgefirst-recorder-v$VERSION-linux-$ARCH"
+          if [[ "$ARCH" == x86_64 ]]; then
+            cp recorder.default dist/recorder.default
           fi
+          file dist/*
 
-          # Copy ARM64 binary
-          if [ -f artifacts/packages-aarch64/edgefirst-recorder-aarch64 ]; then
-            cp artifacts/packages-aarch64/edgefirst-recorder-aarch64 \
-               "release-assets/edgefirst-recorder-v${VERSION}-linux-aarch64"
-            echo "✓ aarch64 binary"
-          else
-            echo "ERROR: aarch64 binary not found"
-            exit 1
-          fi
-
-          # Copy SBOM
-          if [ -f artifacts/sbom/sbom.json ]; then
-            cp artifacts/sbom/sbom.json \
-               "release-assets/edgefirst-recorder-v${VERSION}-sbom.json"
-            echo "✓ SBOM"
-          else
-            echo "ERROR: SBOM not found"
-            exit 1
-          fi
-
-          # Copy default configuration file
-          cp recorder.default release-assets/recorder.default
-          echo "✓ Default configuration"
-
-          echo ""
-          echo "Release assets prepared:"
-          ls -lh release-assets/
-
-      - name: Create GitHub Release
-        uses: softprops/action-gh-release@a06a81a03ee405af7f2048a818ed3f03bbf83c7b  # v2
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
         with:
-          name: EdgeFirst Recorder v${{ needs.prepare-release.outputs.version }}
-          body: |
-            # EdgeFirst Recorder v${{ needs.prepare-release.outputs.version }}
-
-            ## Installation
-
-            ### Download Binaries
-
-            | Platform | Binary |
-            |----------|--------|
-            | Linux x86_64 | `edgefirst-recorder-v${{ needs.prepare-release.outputs.version }}-linux-x86_64` |
-            | Linux ARM64 | `edgefirst-recorder-v${{ needs.prepare-release.outputs.version }}-linux-aarch64` |
-            | Configuration | `recorder.default` |
-
-            ```bash
-            # Download and install (ARM64 example)
-            wget https://github.com/EdgeFirstAI/recorder/releases/download/v${{ needs.prepare-release.outputs.version }}/edgefirst-recorder-v${{ needs.prepare-release.outputs.version }}-linux-aarch64
-            chmod +x edgefirst-recorder-v${{ needs.prepare-release.outputs.version }}-linux-aarch64
-            sudo mv edgefirst-recorder-v${{ needs.prepare-release.outputs.version }}-linux-aarch64 /usr/local/bin/edgefirst-recorder
-
-            # Install default configuration (optional)
-            sudo cp recorder.default /etc/default/recorder
-            ```
-
-            ## What's Changed
-
-            ${{ needs.prepare-release.outputs.changelog }}
-
-            ---
-
-            **Full Documentation**: https://github.com/EdgeFirstAI/recorder#readme
-          files: |
-            release-assets/*
-          draft: false
-          prerelease: ${{ contains(needs.prepare-release.outputs.version, '-') }}
-          fail_on_unmatched_files: true
+          name: dist-${{ matrix.arch }}
+          path: dist/*
+          if-no-files-found: error
+          retention-days: 30

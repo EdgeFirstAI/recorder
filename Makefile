@@ -103,14 +103,12 @@ pre-release: format lint verify-version test
 	@echo "✓ All pre-release checks passed"
 	@echo "=================================================="
 	@echo ""
-	@echo "Next steps:"
-	@echo "  1. Review changes: git status && git diff"
-	@echo "  2. Commit: git add -A && git commit -m 'Prepare release'"
-	@echo "  3. Push: git push origin main"
-	@echo "  4. Wait for CI/CD to pass"
 	@CARGO_VERSION=$$(grep -m1 '^version = ' Cargo.toml | sed 's/version = "\(.*\)"/\1/'); \
-	echo "  5. Tag: git tag -a -m 'Version $$CARGO_VERSION' v$$CARGO_VERSION"; \
-	echo "  6. Push tag: git push origin v$$CARGO_VERSION"
+	echo "Next steps:"; \
+	echo "  1. Commit on release/$$CARGO_VERSION: git commit -s -m 'Release v$$CARGO_VERSION'"; \
+	echo "  2. Push the branch; release.yml builds the binaries and SBOM"; \
+	echo "  3. Open the release PR to main with the ci:full label"; \
+	echo "  4. Merging it tags v$$CARGO_VERSION (tag-release.yml) and publishes (publish.yml)"
 
 # Clean build artifacts
 .PHONY: clean
