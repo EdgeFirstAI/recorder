@@ -11,7 +11,7 @@ on:
 jobs:
   tag:
     if: github.event.pull_request.merged == true && startsWith(github.event.pull_request.head.ref, 'release/')
-    uses: EdgeFirstAI/.github/.github/workflows/tag-release.yml@9f698bee471b68d231c39586af7b610f4080df09  # v2.0.0
+    uses: EdgeFirstAI/.github/.github/workflows/tag-release.yml@002777f34bb28fa359bfe1aa04302b1913c44182  # v2.2.0
     permissions:
       contents: write       # create the tag
       actions: read         # require a green release.yml run
