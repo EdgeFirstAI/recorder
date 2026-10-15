@@ -22,7 +22,7 @@ concurrency:
 
 jobs:
   publish:
-    uses: EdgeFirstAI/.github/.github/workflows/publish-rust.yml@9f698bee471b68d231c39586af7b610f4080df09  # v2.0.0
+    uses: EdgeFirstAI/.github/.github/workflows/publish-rust.yml@002777f34bb28fa359bfe1aa04302b1913c44182  # v2.2.0
     with:
       tag: ${{ inputs.tag }}
       build-workflow: release.yml
