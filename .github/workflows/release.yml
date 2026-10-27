@@ -17,7 +17,7 @@ jobs:
   # Version against the branch name, the CHANGELOG section publish.yml needs,
   # and the full SBOM. The recorder ships binaries, not crates.
   verify:
-    uses: EdgeFirstAI/.github/.github/workflows/release-rust.yml@9e296f92996b38683c684b9091ed59cb27562770  # v2.3.0
+    uses: EdgeFirstAI/.github/.github/workflows/release-rust.yml@c7876194b9fe9f7f72daf0efadaf32d7dff1b257  # v2.3.1
     permissions:
       contents: read
     with:
@@ -46,7 +46,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
 
-      - uses: EdgeFirstAI/.github/.github/actions/setup-rust@9e296f92996b38683c684b9091ed59cb27562770  # v2.3.0
+      - uses: EdgeFirstAI/.github/.github/actions/setup-rust@c7876194b9fe9f7f72daf0efadaf32d7dff1b257  # v2.3.1
         with:
           components: ""
           targets: ${{ matrix.target }}

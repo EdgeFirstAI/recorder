@@ -16,7 +16,7 @@ on:
 
 jobs:
   changed:
-    uses: EdgeFirstAI/.github/.github/workflows/nightly-gate.yml@9e296f92996b38683c684b9091ed59cb27562770  # v2.3.0
+    uses: EdgeFirstAI/.github/.github/workflows/nightly-gate.yml@c7876194b9fe9f7f72daf0efadaf32d7dff1b257  # v2.3.1
     permissions:
       contents: read
       actions: read         # compare against the last nightly run
@@ -24,14 +24,14 @@ jobs:
       force: ${{ inputs.force || false }}
 
   advisories:
-    uses: EdgeFirstAI/.github/.github/workflows/advisories.yml@9e296f92996b38683c684b9091ed59cb27562770  # v2.3.0
+    uses: EdgeFirstAI/.github/.github/workflows/advisories.yml@c7876194b9fe9f7f72daf0efadaf32d7dff1b257  # v2.3.1
     permissions:
       contents: read
 
   nightly:
     needs: changed
     if: needs.changed.outputs.run == 'true'
-    uses: EdgeFirstAI/.github/.github/workflows/rust-full.yml@9e296f92996b38683c684b9091ed59cb27562770  # v2.3.0
+    uses: EdgeFirstAI/.github/.github/workflows/rust-full.yml@c7876194b9fe9f7f72daf0efadaf32d7dff1b257  # v2.3.1
     permissions:
       contents: read
       pull-requests: read
